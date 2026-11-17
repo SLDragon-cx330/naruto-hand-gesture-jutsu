@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>豪火球 · Katon Gōkakyū</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@700;900&display=swap');
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #100804; font-family: 'Noto Sans JP', sans-serif; }
+        #input-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; transform: scaleX(-1); }
+        #dark-overlay { position: absolute; inset: 0; z-index: 5; pointer-events: none; background: radial-gradient(ellipse at center, rgba(60,20,0,0.4) 0%, rgba(15,5,0,0.82) 75%); transition: background 0.5s; }
+        #canvas-container { position: absolute; inset: 0; z-index: 10; pointer-events: none; }
+        #fx-canvas { position: absolute; inset: 0; z-index: 12; pointer-events: none; transform: scaleX(-1); }
+        #ui-layer { position: absolute; inset: 0; z-index: 20; pointer-events: none; display: flex; justify-content: center; align-items: center; }
+        #intro-panel { pointer-events: auto; background: rgba(28,10,4,0.92); padding: 44px 48px; border-radius: 4px; border: 3px solid #ff6b00; text-align: center; max-width: 92vw; box-shadow: 0 0 60px rgba(255,107,0,0.35); }
+        .title { font-size: 2.6rem; font-weight: 900; color: #ff6b00; text-shadow: 0 0 24px #ff5500; letter-spacing: 8px; }
+        .sub { color: #ffc899; margin: 10px 0 24px; letter-spacing: 3px; }
+        .hint { color: rgba(255,200,153,0.85); line-height: 2; font-size: 0.95rem; }
+        .btn { margin-top: 24px; background: linear-gradient(180deg, #ff6b00, #c44d00); border: 2px solid #ffd166; color: #fff8e7; padding: 14px 44px; font-size: 1.1rem; font-weight: 900; cursor: pointer; letter-spacing: 6px; box-shadow: 0 0 30px rgba(255,107,0,0.5); }
+        .btn:hover { transform: scale(1.03); }
+        #chakra-bar-wrap { position: absolute; top: 24px; left: 50%; transform: translateX(-50%); width: min(400px,82vw); display: none; }
+        #chakra-label { color: #ff6b00; font-size: 0.75rem; letter-spacing: 4px; text-align: center; margin-bottom: 4px; }
+        #chakra-bar-bg { height: 10px; background: rgba(40,10,0,0.8); border: 1px solid rgba(255,107,0,0.5); border-radius: 2px; overflow: hidden; }
+        #chakra-bar { height: 100%; width: 0%; background: linear-gradient(90deg, #cc4400, #ff6b00, #ffcc00); box-shadow: 0 0 12px #ff6b00; transition: width 0.12s; }
+        #hud { position: absolute; bottom: 32px; left: 50%; transform: translateX(-50%); background: rgba(28,10,4,0.92); border: 2px solid #ff6b00; padding: 10px 28px; color: #ffc899; font-weight: bold; display: none; white-space: nowrap; }
+        #gesture-hint { position: absolute; top: 72px; right: 24px; display: none; background: rgba(28,10,4,0.88); border: 1px solid #ff6b00; padding: 12px 16px; color: #ffc899; font-size: 0.82rem; line-height: 1.9; }
+        #jutsu-popup { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%) scale(0.6); opacity: 0; pointer-events: none; text-align: center; transition: all 0.35s cubic-bezier(0.34,1.56,0.64,1); }
+        #jutsu-popup.show { opacity: 1; transform: translate(-50%,-50%) scale(1); }
+        #jutsu-popup .jp { font-size: clamp(3rem,10vw,5rem); font-weight: 900; color: #ff6b00; text-shadow: 0 0 30px #ff5500, 4px 4px 0 #000; letter-spacing: 8px; }
+        #jutsu-popup .cn { font-size: 1.1rem; color: rgba(255,255,255,0.8); letter-spacing: 6px; margin-top: 8px; }
+    </style>
+    <script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }</script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+</head>
+<body>
+    <video id="input-video" autoplay playsinline muted></video>
+    <div id="dark-overlay"></div>
+    <div id="canvas-container"></div>
+    <canvas id="fx-canvas"></canvas>
+    <div id="ui-layer">
+        <div id="intro-panel">
+            <div class="title">豪火球</div>
+            <div class="sub">KATON · GŌKAKYŪ NO JUTSU</div>
+            <div class="hint">🖐️ 双手五指张开<br>彼此远离，凝聚火焰查克拉</div>
+            <button class="btn" id="start-btn">开启忍术</button>
+        </div>
+        <div id="chakra-bar-wrap"><div id="chakra-label">チャクラ</div><div id="chakra-bar-bg"><div id="chakra-bar"></div></div></div>
+        <div id="gesture-hint">双手张开远离<br>四指全部伸直<div id="debug-info" style="margin-top:6px;opacity:0.5;font-size:0.72rem"></div></div>
+        <div id="jutsu-popup"><div class="jp">豪火球</div><div class="cn">KATON · GŌKAKYŪ</div></div>
+        <div id="hud">等待手势...</div>
+    </div>
+    <script type="module">
+        import * as THREE from 'three';
+
+        const FINGER_DEFS = [
+            { tip:8, pip:6, mcp:5, label:'食' }, { tip:12, pip:10, mcp:9, label:'中' },
+            { tip:16, pip:14, mcp:13, label:'无' }, { tip:20, pip:18, mcp:17, label:'小' }
+        ];
+
+        const state = { active: false, chakra: 0, time: 0, pos: { x:0.5, y:0.5 }, size: 0.25, landmarks: null, popupTimer: 0 };
+        let scene, camera, renderer, effectGroup, fxCtx, fxW, fxH;
+        const CAMERA_Z = 10;
+        const fireParticles = [];
+
+        function dist(a,b) { return Math.hypot(a.x-b.x, a.y-b.y); }
+        function palmCenter(lm) { const ids=[0,5,9,13,17]; let x=0,y=0; ids.forEach(i=>{x+=lm[i].x;y+=lm[i].y}); return {x:x/5,y:y/5}; }
+        function fingerRatio(lm, tip, pip, mcp) { const a=dist(lm[tip],lm[pip]), b=dist(lm[pip],lm[mcp]); return b<0.001?0:a/b; }
+        function isOpenPalm(lm) { return FINGER_DEFS.every(f => { const r=fingerRatio(lm,f.tip,f.pip,f.mcp); return r>1.05; }); }
+
+        function detectPose(hands) {
+            if (hands.length !== 2) return false;
+            const p0 = palmCenter(hands[0]), p1 = palmCenter(hands[1]);
+            return dist(p0,p1) > 0.30 && isOpenPalm(hands[0]) && isOpenPalm(hands[1]);
+        }
+
+        function updateTarget(hands) {
+            const p0 = palmCenter(hands[0]), p1 = palmCenter(hands[1]);
+            state.pos.x = 1 - (p0.x + p1.x) / 2;
+            state.pos.y = (p0.y + p1.y) / 2;
+            state.size = 0.15 + dist(p0, p1) * 0.35;
+        }
+
+        function formatDebug(hands) {
+            if (hands.length !== 2) return hands.length ? '需要双手' : '未检测到手';
+            const d = dist(palmCenter(hands[0]), palmCenter(hands[1]));
+            const o0 = isOpenPalm(hands[0]), o1 = isOpenPalm(hands[1]);
+            return `掌距${(d*100).toFixed(0)}% · 左手${o0?'张开':'未张'} · 右手${o1?'张开':'未张'}`;
+        }
+
+        function makeTex(inner, mid) {
+            const c=document.createElement('canvas');c.width=64;c.height=64;const ctx=c.getContext('2d');
+            const g=ctx.createRadialGradient(32,32,0,32,32,32);
+            g.addColorStop(0,inner);g.addColorStop(0.35,mid);g.addColorStop(1,'rgba(0,0,0,0)');
+            ctx.fillStyle=g;ctx.fillRect(0,0,64,64);return new THREE.CanvasTexture(c);
+        }
+        function spherePts(r,n) { const p=[]; for(let i=0;i<n;i++){const phi=Math.acos(2*Math.random()-1),th=Math.random()*Math.PI*2,rr=r*Math.cbrt(Math.random());p.push(rr*Math.sin(phi)*Math.cos(th),rr*Math.sin(phi)*Math.sin(th),rr*Math.cos(phi))} return p; }
+        function pts(pos,color,size,opacity,tex) {
+            const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
+            return new THREE.Points(g,new THREE.PointsMaterial({color,size,map:tex,transparent:true,blending:THREE.AdditiveBlending,depthWrite:false,opacity}));
+        }
+
+        function buildEffect() {
+            const g=new THREE.Group();
+            const tFire=makeTex('rgba(255,255,200,1)','rgba(255,160,0,0.95)');
+            const tCore=makeTex('rgba(255,255,255,1)','rgba(255,220,100,1)');
+            g.add(pts(spherePts(0.28,1500),0xff6600,0.09,0.75,tFire));
+            g.add(pts(spherePts(0.15,600),0xffcc00,0.07,0.9,tCore));
+            g.flames=[];
+            for(let i=0;i<6;i++){const f=pts([],0xff4400,0.06,0.6,tFire);g.add(f);g.flames.push(f)}
+            g.visible=false;return g;
+        }
+
+        function worldPos(nx,ny) {
+            const vf=camera.fov*Math.PI/180,vh=2*Math.tan(vf/2)*CAMERA_Z,vw=vh*camera.aspect;
+            return {x:(nx-0.5)*vw,y:-(ny-0.5)*vh};
+        }
+
+        function spawnEmber(x,y) {
+            const a=Math.random()*Math.PI*2;
+            fireParticles.push({x,y,vx:Math.cos(a)*(1+Math.random()*3),vy:Math.sin(a)*(1+Math.random()*3)-2,life:1,size:3+Math.random()*5,hue:15+Math.random()*30});
+        }
+
+        function initThree() {
+            scene=new THREE.Scene();camera=new THREE.PerspectiveCamera(50,innerWidth/innerHeight,0.1,100);camera.position.z=CAMERA_Z;
+            renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});renderer.setPixelRatio(devicePixelRatio);renderer.setSize(innerWidth,innerHeight);
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+            effectGroup=buildEffect();scene.add(effectGroup);animate();
+        }
+
+        function drawFX2D() {
+            fxCtx.clearRect(0,0,fxW,fxH); fxCtx.globalCompositeOperation='lighter';
+            if (state.landmarks) {
+                for (const lm of state.allHands) {
+                    const conns=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[9,10],[10,11],[11,12],[13,14],[14,15],[15,16],[0,17],[17,18],[18,19],[19,20],[5,9],[9,13],[13,17]];
+                    fxCtx.strokeStyle=state.active?'rgba(255,150,50,0.5)':'rgba(255,120,50,0.3)';fxCtx.lineWidth=2;
+                    for(const [a,b] of conns){fxCtx.beginPath();fxCtx.moveTo(lm[a].x*fxW,lm[a].y*fxH);fxCtx.lineTo(lm[b].x*fxW,lm[b].y*fxH);fxCtx.stroke()}
+                }
+            }
+            if (state.active) {
+                const px=(1-state.pos.x)*fxW, py=state.pos.y*fxH, r=state.size*Math.min(fxW,fxH)*0.5;
+                if(Math.random()<0.6)spawnEmber(px+(Math.random()-0.5)*r,py+(Math.random()-0.5)*r);
+                fxCtx.shadowBlur=40;fxCtx.shadowColor='#ff4400';
+                const grad=fxCtx.createRadialGradient(px,py,0,px,py,r);
+                grad.addColorStop(0,'rgba(255,255,200,0.9)');grad.addColorStop(0.3,'rgba(255,120,0,0.7)');grad.addColorStop(0.7,'rgba(255,40,0,0.35)');grad.addColorStop(1,'rgba(100,0,0,0)');
+                fxCtx.fillStyle=grad;fxCtx.beginPath();fxCtx.arc(px,py,r,0,Math.PI*2);fxCtx.fill();
+            }
+            for(let i=fireParticles.length-1;i>=0;i--){const f=fireParticles[i];f.x+=f.vx;f.y+=f.vy;f.vy+=0.05;f.life-=0.025;if(f.life<=0){fireParticles.splice(i,1);continue}fxCtx.globalAlpha=f.life;fxCtx.fillStyle=`hsl(${f.hue},100%,${50+f.life*30}%)`;fxCtx.beginPath();fxCtx.arc(f.x,f.y,f.size*f.life,0,Math.PI*2);fxCtx.fill()}
+            fxCtx.globalAlpha=1;fxCtx.shadowBlur=0;
+        }
+
+        function animate() {
+            requestAnimationFrame(animate); state.time+=0.016;
+            effectGroup.visible=state.active;
+            if(state.active){
+                const vh=2*Math.tan(camera.fov*Math.PI/180/2)*CAMERA_Z,w=worldPos(state.pos.x,state.pos.y);
+                const pulse=1+Math.sin(state.time*4)*0.06,s=state.size*vh*pulse*(1+state.chakra*0.2);
+                effectGroup.position.lerp(new THREE.Vector3(w.x,w.y,0),0.15);
+                effectGroup.scale.lerp(new THREE.Vector3(s,s,s),0.12);
+                effectGroup.rotation.z=state.time*0.5;
+                effectGroup.flames.forEach((flame,i)=>{const a=i/effectGroup.flames.length*Math.PI*2+state.time*3,r=0.2+Math.sin(state.time*5+i)*0.05,pos=[];for(let j=0;j<20;j++){const t=j/20;pos.push(Math.cos(a)*r*t,Math.sin(a)*r*t+t*0.15,(Math.random()-0.5)*0.05)}flame.geometry.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));flame.geometry.attributes.position.needsUpdate=true});
+            }
+            drawFX2D(); renderer.render(scene,camera);
+        }
+
+        function showPopup(){const pop=document.getElementById('jutsu-popup');pop.classList.add('show');clearTimeout(state.popupTimer);state.popupTimer=setTimeout(()=>pop.classList.remove('show'),1200)}
+
+        function onResults(hands) {
+            state.allHands=hands; state.landmarks=hands[0]||null;
+            const hit=detectPose(hands);
+            if(hit&&!state.active){state.active=true;effectGroup.scale.set(0.5,0.5,0.5);showPopup()}
+            if(!hit)state.active=false;
+            if(state.active){state.chakra=Math.min(1,state.chakra+0.025);updateTarget(hands)}
+            else state.chakra=Math.max(0,state.chakra-0.03);
+            document.getElementById('chakra-bar').style.width=(state.chakra*100)+'%';
+            document.getElementById('dark-overlay').style.background=state.active
+                ? 'radial-gradient(ellipse at center, rgba(80,30,0,0.5) 0%, rgba(20,5,0,0.88) 75%)'
+                : 'radial-gradient(ellipse at center, rgba(60,20,0,0.4) 0%, rgba(15,5,0,0.82) 75%)';
+            document.getElementById('hud').textContent=state.active?'✦ 豪火球之术！':(hands.length>=2?'双手张开远离':'请将双手放入画面');
+            document.getElementById('hud').style.color=state.active?'#ff6b00':'#ffc899';
+            document.getElementById('debug-info').textContent=formatDebug(hands);
+        }
+
+        async function start() {
+            document.getElementById('intro-panel').style.display='none';
+            ['hud','chakra-bar-wrap','gesture-hint'].forEach(id=>document.getElementById(id).style.display='block');
+            const fx=document.getElementById('fx-canvas');fxCtx=fx.getContext('2d');fxW=innerWidth;fxH=innerHeight;fx.width=fxW;fx.height=fxH;
+            initThree();
+            const video=document.getElementById('input-video');
+            const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:1280,height:720}});
+            video.srcObject=stream; await new Promise(r=>video.onloadedmetadata=r); video.play();
+            const hands=new Hands({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+            hands.setOptions({maxNumHands:2,modelComplexity:1,minDetectionConfidence:0.5,minTrackingConfidence:0.5});
+            hands.onResults(r=>onResults(r.multiHandLandmarks||[]));
+            await new Camera(video,{onFrame:async()=>{await hands.send({image:video})},width:1280,height:720}).start();
+        }
+
+        document.getElementById('start-btn').addEventListener('click',start);
+        addEventListener('resize',()=>{fxW=innerWidth;fxH=innerHeight;const fx=document.getElementById('fx-canvas');if(fx){fx.width=fxW;fx.height=fxH}if(camera&&renderer){camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)}});
+    </script>
+</body>
+</html>

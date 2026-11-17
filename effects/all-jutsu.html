@@ -1,0 +1,874 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>火影忍术 · 手势查克拉</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@700;900&display=swap');
+
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #0a0806; font-family: 'Noto Sans JP', sans-serif; }
+
+        #input-video {
+            position: absolute; inset: 0; width: 100%; height: 100%;
+            object-fit: cover; z-index: 0; transform: scaleX(-1);
+        }
+        #dark-overlay {
+            position: absolute; inset: 0; z-index: 5; pointer-events: none;
+            background: radial-gradient(ellipse at center, rgba(20,12,4,0.35) 0%, rgba(5,3,1,0.78) 75%);
+            transition: background 0.5s;
+        }
+        #canvas-container { position: absolute; inset: 0; z-index: 10; pointer-events: none; }
+        #fx-canvas { position: absolute; inset: 0; z-index: 12; pointer-events: none; transform: scaleX(-1); }
+
+        #ui-layer {
+            position: absolute; inset: 0; z-index: 20; pointer-events: none;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+        }
+
+        #intro-panel {
+            pointer-events: auto;
+            background: linear-gradient(160deg, rgba(30,18,6,0.94), rgba(12,8,4,0.96));
+            padding: 44px 50px; border-radius: 4px;
+            border: 3px solid #e85d04;
+            border-top: 6px solid #ff6b00;
+            box-shadow: 0 0 60px rgba(232,93,4,0.35), inset 0 0 30px rgba(0,0,0,0.5);
+            text-align: center; max-width: 92vw;
+        }
+        .konoha-title {
+            font-size: 2.8rem; font-weight: 900; color: #ff6b00;
+            text-shadow: 0 0 20px #e85d04, 2px 2px 0 #3d1f00;
+            letter-spacing: 6px; margin-bottom: 6px;
+        }
+        .konoha-sub { color: #f4c095; letter-spacing: 3px; font-size: 1rem; margin-bottom: 24px; }
+        .jutsu-list { color: rgba(244,192,149,0.85); font-size: 0.92rem; line-height: 2; text-align: left; display: inline-block; }
+        .jutsu-list span { color: #4dc9ff; font-weight: bold; }
+        .jutsu-list .fire { color: #ff5500; }
+        .btn-ninja {
+            margin-top: 28px;
+            background: linear-gradient(180deg, #ff6b00, #c44d00);
+            border: 2px solid #ffd166;
+            color: #fff8e7;
+            padding: 14px 48px;
+            font-size: 1.2rem; font-weight: 900;
+            cursor: pointer; letter-spacing: 8px;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.6);
+            box-shadow: 0 4px 0 #7a2e00, 0 0 30px rgba(255,107,0,0.5);
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+        .btn-ninja:hover { transform: translateY(-2px); box-shadow: 0 6px 0 #7a2e00, 0 0 40px rgba(255,107,0,0.7); }
+        .btn-ninja:active { transform: translateY(2px); box-shadow: 0 2px 0 #7a2e00; }
+
+        #chakra-bar-wrap {
+            position: absolute; top: 24px; left: 50%; transform: translateX(-50%);
+            width: min(400px, 82vw); display: none;
+        }
+        #chakra-label { color: #4dc9ff; font-size: 0.75rem; letter-spacing: 4px; text-align: center; margin-bottom: 4px; text-shadow: 0 0 8px #4dc9ff; }
+        #chakra-bar-bg {
+            height: 10px; background: rgba(0,20,40,0.8);
+            border: 1px solid rgba(77,201,255,0.5); border-radius: 2px; overflow: hidden;
+        }
+        #chakra-bar { height: 100%; width: 0%; background: linear-gradient(90deg, #0066cc, #4dc9ff, #aaf0ff); box-shadow: 0 0 12px #4dc9ff; transition: width 0.12s; }
+
+        #hud {
+            position: absolute; bottom: 32px;
+            background: rgba(10,6,2,0.92);
+            border: 2px solid #e85d04;
+            padding: 10px 28px; border-radius: 2px;
+            color: #f4c095; font-weight: bold; letter-spacing: 2px;
+            font-size: 1rem; display: none;
+            box-shadow: 0 0 20px rgba(232,93,4,0.4);
+        }
+
+        #jutsu-popup {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) scale(0.6);
+            opacity: 0; pointer-events: none; text-align: center;
+            transition: opacity 0.25s, transform 0.35s cubic-bezier(0.34,1.56,0.64,1);
+        }
+        #jutsu-popup.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+        #jutsu-popup .jp {
+            font-size: clamp(3rem, 10vw, 5.5rem); font-weight: 900;
+            color: #fff; text-shadow: 0 0 30px currentColor, 4px 4px 0 rgba(0,0,0,0.8);
+            letter-spacing: 8px; line-height: 1.1;
+        }
+        #jutsu-popup .cn { font-size: 1.2rem; color: rgba(255,255,255,0.8); letter-spacing: 6px; margin-top: 8px; }
+
+        #gesture-hint {
+            position: absolute; top: 72px; right: 24px;
+            background: rgba(10,6,2,0.85); border: 1px solid rgba(232,93,4,0.6);
+            padding: 12px 16px; border-radius: 2px; display: none;
+            color: rgba(244,192,149,0.9); font-size: 0.8rem; line-height: 1.9;
+        }
+        #gesture-hint b { color: #4dc9ff; }
+        #gesture-hint .fire { color: #ff6b00; }
+    </style>
+    <script type="importmap">
+        { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+</head>
+<body>
+    <video id="input-video" autoplay playsinline muted></video>
+    <div id="dark-overlay"></div>
+    <div id="canvas-container"></div>
+    <canvas id="fx-canvas"></canvas>
+
+    <div id="ui-layer">
+        <div id="intro-panel">
+            <div class="konoha-title">火影忍术</div>
+            <div class="konoha-sub">手势查克拉 · 忍术再现</div>
+            <div class="jutsu-list">
+                🤲 双手靠近合拢 / 单手握拳捧球 → <span>螺旋丸 Rasengan</span><br>
+                ☝️ 单手食指竖起（或两指并拢） → <span>千鸟 Chidori</span><br>
+                🖐️ 双手张开远离 → <span class="fire">豪火球 Katon</span>
+            </div>
+            <button id="start-btn" class="btn-ninja">结印开始</button>
+        </div>
+
+        <div id="chakra-bar-wrap">
+            <div id="chakra-label">チャクラ CHAKRA</div>
+            <div id="chakra-bar-bg"><div id="chakra-bar"></div></div>
+        </div>
+
+        <div id="gesture-hint">
+            <b>螺旋丸</b> 双手靠近合拢 / 单手握拳<br>
+            <b>千鸟</b> 食指竖起指向镜头<br>
+            <span class="fire"><b>豪火球</b> 双手张开远离</span>
+            <div id="debug-info" style="margin-top:8px;color:rgba(255,255,255,0.5);font-size:0.72rem;"></div>
+        </div>
+
+        <div id="jutsu-popup">
+            <div class="jp" id="jutsu-jp">螺旋丸</div>
+            <div class="cn" id="jutsu-cn">RASENGAN</div>
+        </div>
+
+        <div id="hud">等待忍者入镜...</div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        const JUTSU = {
+            idle:    { jp: '', cn: '', color: '#888' },
+            rasengan:{ jp: '螺旋丸', cn: 'RASENGAN', color: '#4dc9ff' },
+            chidori: { jp: '千鳥', cn: 'CHIDORI', color: '#66ccff' },
+            katon:   { jp: '豪火球', cn: 'KATON · GŌKAKYŪ', color: '#ff5500' }
+        };
+
+        const state = {
+            jutsu: 'idle',
+            prevJutsu: 'idle',
+            chakra: 0,
+            time: 0,
+            pos: { x: 0.5, y: 0.5 },
+            size: 0.12,
+            handAngle: 0,
+            landmarks: null,
+            allHands: [],
+            shake: 0,
+            popupTimer: 0
+        };
+
+        let scene, camera, renderer;
+        let rasenganGroup, chidoriGroup, katonGroup;
+        let fxCtx, fxW, fxH;
+        const CAMERA_Z = 10;
+        let audioCtx = null;
+
+        // ─── 纹理 & 几何 ───
+        function makeTex(inner, outer, mid) {
+            const c = document.createElement('canvas');
+            c.width = 64; c.height = 64;
+            const ctx = c.getContext('2d');
+            const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+            g.addColorStop(0, inner);
+            g.addColorStop(0.35, mid);
+            g.addColorStop(0.8, outer);
+            g.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.fillStyle = g;
+            ctx.fillRect(0, 0, 64, 64);
+            return new THREE.CanvasTexture(c);
+        }
+
+        function pts(pos, color, size, opacity, tex) {
+            const g = new THREE.BufferGeometry();
+            g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+            return new THREE.Points(g, new THREE.PointsMaterial({
+                color, size, map: tex, transparent: true,
+                blending: THREE.AdditiveBlending, depthWrite: false, opacity
+            }));
+        }
+
+        function spiralPts(turns, ptsPerTurn, rMax, tight = 0.12) {
+            const p = [];
+            const total = turns * ptsPerTurn;
+            for (let i = 0; i < total; i++) {
+                const t = i / total;
+                const theta = t * turns * Math.PI * 2;
+                const r = t * rMax;
+                p.push(Math.cos(theta) * r, Math.sin(theta) * r, (Math.random() - 0.5) * tight);
+            }
+            return p;
+        }
+
+        function ringPts(r, n, jitter = 0) {
+            const p = [];
+            for (let i = 0; i < n; i++) {
+                const a = (i / n) * Math.PI * 2;
+                const rr = r + (Math.random() - 0.5) * jitter;
+                p.push(Math.cos(a) * rr, Math.sin(a) * rr, (Math.random() - 0.5) * 0.04);
+            }
+            return p;
+        }
+
+        function spherePts(r, n) {
+            const p = [];
+            for (let i = 0; i < n; i++) {
+                const phi = Math.acos(2 * Math.random() - 1);
+                const th = Math.random() * Math.PI * 2;
+                const rr = r * Math.cbrt(Math.random());
+                p.push(rr * Math.sin(phi) * Math.cos(th), rr * Math.sin(phi) * Math.sin(th), rr * Math.cos(phi));
+            }
+            return p;
+        }
+
+        // ─── 螺旋丸 Three.js 组 ───
+        function buildRasengan() {
+            const g = new THREE.Group();
+            const tBlue = makeTex('rgba(255,255,255,1)', 'rgba(0,150,255,0.3)', 'rgba(100,220,255,0.95)');
+            const tWhite = makeTex('rgba(255,255,255,1)', 'rgba(200,240,255,0.5)', 'rgba(255,255,255,0.9)');
+
+            // 多层螺旋 — 火影螺旋丸核心视觉（加大粒子）
+            for (let layer = 0; layer < 5; layer++) {
+                const mesh = pts(spiralPts(3 + layer * 0.5, 300, 0.32 + layer * 0.04, 0.08), 0x88ddff, 0.12 + layer * 0.02, 0.85 - layer * 0.06, tBlue);
+                mesh.userData.layer = layer;
+                g.add(mesh);
+            }
+            g.add(pts(ringPts(0.18, 600, 0.02), 0xffffff, 0.10, 0.95, tWhite));
+            g.add(pts(spherePts(0.12, 800), 0xaaf0ff, 0.14, 0.95, tWhite));
+            g.add(pts(ringPts(0.35, 400, 0.06), 0x3399ff, 0.08, 0.6, tBlue));
+            g.visible = false;
+            return g;
+        }
+
+        // ─── 千鸟 Three.js 组（球核+电弧） ───
+        function buildChidori() {
+            const g = new THREE.Group();
+            const tBolt = makeTex('rgba(255,255,255,1)', 'rgba(80,180,255,0.4)', 'rgba(150,230,255,1)');
+            g.core = pts(spherePts(0.08, 400), 0xccffff, 0.14, 0.95, tBolt);
+            g.bolts = [];
+            for (let i = 0; i < 8; i++) {
+                const b = pts([], 0x88eeff, 0.10, 0.9, tBolt);
+                g.add(b);
+                g.bolts.push(b);
+            }
+            g.add(g.core);
+            g.visible = false;
+            return g;
+        }
+
+        // ─── 豪火球 ───
+        function buildKaton() {
+            const g = new THREE.Group();
+            const tFire = makeTex('rgba(255,255,200,1)', 'rgba(255,80,0,0.4)', 'rgba(255,160,0,0.95)');
+            const tCore = makeTex('rgba(255,255,255,1)', 'rgba(255,100,0,0.5)', 'rgba(255,220,100,1)');
+            g.add(pts(spherePts(0.28, 1500), 0xff6600, 0.09, 0.75, tFire));
+            g.add(pts(spherePts(0.15, 600), 0xffcc00, 0.07, 0.9, tCore));
+            for (let i = 0; i < 6; i++) {
+                const flame = pts([], 0xff4400, 0.06, 0.6, tFire);
+                flame.userData.idx = i;
+                g.add(flame);
+                g.flames = g.flames || [];
+                g.flames.push(flame);
+            }
+            g.visible = false;
+            return g;
+        }
+
+        function genBoltPoints(x1, y1, x2, y2, segs = 10) {
+            const p = [];
+            for (let i = 0; i <= segs; i++) {
+                const t = i / segs;
+                p.push(
+                    x1 + (x2 - x1) * t + (Math.random() - 0.5) * 0.05,
+                    y1 + (y2 - y1) * t + (Math.random() - 0.5) * 0.05,
+                    (Math.random() - 0.5) * 0.04
+                );
+            }
+            return p;
+        }
+
+        function worldPos(nx, ny) {
+            const vf = camera.fov * Math.PI / 180;
+            const vh = 2 * Math.tan(vf / 2) * CAMERA_Z;
+            const vw = vh * camera.aspect;
+            return { x: (nx - 0.5) * vw, y: -(ny - 0.5) * vh };
+        }
+
+        function initThree() {
+            const box = document.getElementById('canvas-container');
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
+            camera.position.z = CAMERA_Z;
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            box.appendChild(renderer.domElement);
+
+            rasenganGroup = buildRasengan();
+            chidoriGroup = buildChidori();
+            katonGroup = buildKaton();
+            scene.add(rasenganGroup, chidoriGroup, katonGroup);
+            animate3D();
+        }
+
+        // ─── 手势识别（放宽判定，贴近真实使用习惯） ───
+        function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+
+        function palmCenter(lm) {
+            const ids = [0, 5, 9, 13, 17];
+            let x = 0, y = 0;
+            ids.forEach(i => { x += lm[i].x; y += lm[i].y; });
+            return { x: x / 5, y: y / 5 };
+        }
+
+        // 指尖到 PIP 的距离 > PIP 到 MCP → 手指伸直
+        function fingerExtended(lm, tipIdx, pipIdx, mcpIdx) {
+            return dist(lm[tipIdx], lm[pipIdx]) > dist(lm[pipIdx], lm[mcpIdx]) * 0.85;
+        }
+
+        function isIndexUp(lm) {
+            if (isOpenPalm(lm)) return false;
+            const idx = fingerExtended(lm, 8, 6, 5);
+            const pinky = fingerExtended(lm, 20, 18, 17);
+            // 食指竖起即可，不要求中指必须并拢
+            return idx && !pinky;
+        }
+
+        function isChidoriPose(lm) {
+            return isIndexUp(lm);
+        }
+
+        function isCuppedHand(lm) {
+            const others = [
+                [12, 10, 9], [16, 14, 13], [20, 18, 17]
+            ];
+            const curled = others.every(([tip, pip, mcp]) => !fingerExtended(lm, tip, pip, mcp));
+            return curled;
+        }
+
+        function isOpenPalm(lm) {
+            return [8, 12, 16, 20].every((tip, i) => {
+                const pips = [6, 10, 14, 18];
+                return fingerExtended(lm, tip, pips[i], [5, 9, 13, 17][i]);
+            });
+        }
+
+        function detectJutsu(hands) {
+            // 优先：双手靠近 → 螺旋丸
+            if (hands.length === 2) {
+                const p0 = palmCenter(hands[0]);
+                const p1 = palmCenter(hands[1]);
+                const d = dist(p0, p1);
+                const bothOpen = isOpenPalm(hands[0]) && isOpenPalm(hands[1]);
+                if (d < 0.38 && !bothOpen) return 'rasengan';
+                if (d > 0.32 && bothOpen) return 'katon';
+            }
+            // 单手：食指竖起 → 千鸟（最常见姿势）
+            if (hands.length >= 1) {
+                if (isChidoriPose(hands[0])) return 'chidori';
+                // 单手握拳捧球 → 小螺旋丸
+                if (isCuppedHand(hands[0])) return 'rasengan';
+            }
+            return 'idle';
+        }
+
+        function updateJutsuTarget(hands, jutsu) {
+            if (jutsu === 'rasengan') {
+                if (hands.length === 2) {
+                    const p0 = palmCenter(hands[0]);
+                    const p1 = palmCenter(hands[1]);
+                    state.pos.x = 1 - (p0.x + p1.x) / 2;
+                    state.pos.y = (p0.y + p1.y) / 2;
+                    state.size = Math.max(0.18, 0.35 - dist(p0, p1) * 0.45);
+                } else if (hands.length === 1) {
+                    const p = palmCenter(hands[0]);
+                    state.pos.x = 1 - p.x;
+                    state.pos.y = p.y;
+                    state.size = 0.2;
+                }
+            } else if (jutsu === 'chidori' && hands.length >= 1) {
+                const lm = hands[0];
+                const tip = lm[8];
+                const wrist = lm[0];
+                state.pos.x = 1 - tip.x;
+                state.pos.y = tip.y;
+                state.handAngle = Math.atan2(tip.y - wrist.y, tip.x - wrist.x);
+                state.size = 0.22;
+            } else if (jutsu === 'katon' && hands.length === 2) {
+                const p0 = palmCenter(hands[0]);
+                const p1 = palmCenter(hands[1]);
+                state.pos.x = 1 - (p0.x + p1.x) / 2;
+                state.pos.y = (p0.y + p1.y) / 2;
+                state.size = 0.15 + dist(p0, p1) * 0.35;
+            }
+        }
+
+        function getGestureDebug(hands) {
+            if (!hands.length) return '未检测到手';
+            const lm = hands[0];
+            const parts = [`${hands.length}只手`];
+            if (isIndexUp(lm)) parts.push('食指↑');
+            if (isCuppedHand(lm)) parts.push('握拳');
+            if (hands.length === 2) {
+                const d = dist(palmCenter(hands[0]), palmCenter(hands[1]));
+                parts.push(`掌距${(d * 100).toFixed(0)}%`);
+            }
+            return parts.join(' · ');
+        }
+
+        // ─── 千鸟音效（Web Audio 模拟鸟鸣） ───
+        function chirpChidori() {
+            if (!audioCtx) return;
+            try {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(1800 + Math.random() * 1200, audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(600, audioCtx.currentTime + 0.06);
+                gain.gain.setValueAtTime(0.04, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.08);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.08);
+            } catch (_) {}
+        }
+
+        // ─── 2D 特效层（千鸟鸟形火花 + 豪火粒子） ───
+        const sparks = [];
+        const fireParticles = [];
+
+        function spawnChidoriBird(x, y, angle) {
+            for (let i = 0; i < 3; i++) {
+                const a = angle + (Math.random() - 0.5) * 1.2;
+                sparks.push({
+                    x, y, vx: Math.cos(a) * (4 + Math.random() * 5), vy: Math.sin(a) * (4 + Math.random() * 5),
+                    life: 1, type: 'bird', size: 2 + Math.random() * 3
+                });
+            }
+        }
+
+        function spawnFireEmber(x, y) {
+            const a = Math.random() * Math.PI * 2;
+            fireParticles.push({
+                x, y, vx: Math.cos(a) * (1 + Math.random() * 3), vy: Math.sin(a) * (1 + Math.random() * 3) - 2,
+                life: 1, size: 3 + Math.random() * 5, hue: 15 + Math.random() * 30
+            });
+        }
+
+        function drawFX2D() {
+            fxCtx.save();
+            if (state.shake > 0) {
+                fxCtx.translate((Math.random() - 0.5) * state.shake * 4, (Math.random() - 0.5) * state.shake * 4);
+                state.shake *= 0.85;
+                if (state.shake < 0.3) state.shake = 0;
+            }
+
+            fxCtx.clearRect(0, 0, fxW, fxH);
+            fxCtx.globalCompositeOperation = 'lighter';
+
+            // 手部骨架（确认识别成功）
+            if (state.landmarks) {
+                const lm = state.landmarks;
+                const conns = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[9,10],[10,11],[11,12],[13,14],[14,15],[15,16],[0,17],[17,18],[18,19],[19,20],[5,9],[9,13],[13,17]];
+                fxCtx.strokeStyle = state.jutsu === 'chidori' ? 'rgba(0,255,200,0.5)' : state.jutsu === 'rasengan' ? 'rgba(100,200,255,0.5)' : 'rgba(255,180,100,0.35)';
+                fxCtx.lineWidth = 2;
+                for (const [a, b] of conns) {
+                    fxCtx.beginPath();
+                    fxCtx.moveTo(lm[a].x * fxW, lm[a].y * fxH);
+                    fxCtx.lineTo(lm[b].x * fxW, lm[b].y * fxH);
+                    fxCtx.stroke();
+                }
+            }
+
+            // 螺旋丸 2D 层（镜像 canvas 需用原始 x，即 1 - state.pos.x）
+            if (state.jutsu === 'rasengan') {
+                const px = (1 - state.pos.x) * fxW, py = state.pos.y * fxH;
+                const baseR = state.size * Math.min(fxW, fxH) * 0.55;
+                const rot = state.time * 8;
+
+                fxCtx.shadowBlur = 50;
+                fxCtx.shadowColor = '#4dc9ff';
+
+                // 外层旋转光环
+                for (let ring = 0; ring < 3; ring++) {
+                    const r = baseR * (0.6 + ring * 0.2);
+                    const startA = rot * (ring % 2 === 0 ? 1 : -1) + ring;
+                    fxCtx.strokeStyle = `rgba(100,220,255,${0.7 - ring * 0.15})`;
+                    fxCtx.lineWidth = 4 - ring;
+                    fxCtx.beginPath();
+                    for (let i = 0; i <= 60; i++) {
+                        const a = startA + (i / 60) * Math.PI * 2;
+                        const wobble = Math.sin(a * 6 + state.time * 10) * 4;
+                        const rr = r + wobble;
+                        const x = px + Math.cos(a) * rr, y = py + Math.sin(a) * rr;
+                        i === 0 ? fxCtx.moveTo(x, y) : fxCtx.lineTo(x, y);
+                    }
+                    fxCtx.closePath();
+                    fxCtx.stroke();
+                }
+
+                // 螺旋臂
+                for (let arm = 0; arm < 4; arm++) {
+                    fxCtx.strokeStyle = 'rgba(200,240,255,0.85)';
+                    fxCtx.lineWidth = 3;
+                    fxCtx.beginPath();
+                    for (let i = 0; i < 80; i++) {
+                        const t = i / 80;
+                        const a = rot * 2.5 + arm * (Math.PI / 2) + t * Math.PI * 4;
+                        const r = t * baseR * 0.9;
+                        const x = px + Math.cos(a) * r, y = py + Math.sin(a) * r;
+                        i === 0 ? fxCtx.moveTo(x, y) : fxCtx.lineTo(x, y);
+                    }
+                    fxCtx.stroke();
+                }
+
+                // 白色查克拉核心
+                const grad = fxCtx.createRadialGradient(px, py, 0, px, py, baseR * 0.45);
+                grad.addColorStop(0, 'rgba(255,255,255,1)');
+                grad.addColorStop(0.4, 'rgba(150,230,255,0.9)');
+                grad.addColorStop(1, 'rgba(0,100,200,0)');
+                fxCtx.fillStyle = grad;
+                fxCtx.beginPath();
+                fxCtx.arc(px, py, baseR * 0.45, 0, Math.PI * 2);
+                fxCtx.fill();
+                fxCtx.shadowBlur = 0;
+            }
+
+            // 千鸟 2D 电弧 + 鸟形火花
+            if (state.jutsu === 'chidori' && state.landmarks) {
+                const lm = state.landmarks;
+                const hx = lm[8].x * fxW, hy = lm[8].y * fxH;
+                const wx = lm[0].x * fxW, wy = lm[0].y * fxH;
+
+                fxCtx.shadowBlur = 20;
+                fxCtx.shadowColor = '#66ccff';
+                fxCtx.strokeStyle = 'rgba(150,230,255,0.9)';
+                fxCtx.lineWidth = 3;
+                for (let b = 0; b < 5; b++) {
+                    fxCtx.beginPath();
+                    fxCtx.moveTo(wx, wy);
+                    let px = wx, py = wy;
+                    const segs = 6 + Math.floor(Math.random() * 4);
+                    for (let s = 1; s <= segs; s++) {
+                        const t = s / segs;
+                        const tx = wx + (hx - wx) * t + (Math.random() - 0.5) * 30;
+                        const ty = wy + (hy - wy) * t + (Math.random() - 0.5) * 30;
+                        fxCtx.lineTo(tx, ty);
+                        px = tx; py = ty;
+                    }
+                    fxCtx.stroke();
+                }
+
+                if (Math.random() < 0.35) {
+                    spawnChidoriBird(hx, hy, state.handAngle);
+                    if (Math.random() < 0.2) chirpChidori();
+                }
+
+                // 千鸟光球（加大）
+                const ballR = 28 + Math.sin(state.time * 20) * 4 + state.chakra * 10;
+                const ballGrad = fxCtx.createRadialGradient(hx, hy, 0, hx, hy, ballR);
+                ballGrad.addColorStop(0, 'rgba(255,255,255,1)');
+                ballGrad.addColorStop(0.3, 'rgba(100,220,255,0.95)');
+                ballGrad.addColorStop(0.7, 'rgba(0,120,255,0.5)');
+                ballGrad.addColorStop(1, 'rgba(0,50,150,0)');
+                fxCtx.fillStyle = ballGrad;
+                fxCtx.shadowBlur = 40;
+                fxCtx.shadowColor = '#4dc9ff';
+                fxCtx.beginPath();
+                fxCtx.arc(hx, hy, ballR, 0, Math.PI * 2);
+                fxCtx.fill();
+
+                // 放射闪电
+                for (let r = 0; r < 8; r++) {
+                    const angle = (r / 8) * Math.PI * 2 + state.time * 15;
+                    fxCtx.strokeStyle = 'rgba(180,240,255,0.8)';
+                    fxCtx.lineWidth = 2;
+                    fxCtx.beginPath();
+                    fxCtx.moveTo(hx, hy);
+                    let lx = hx, ly = hy;
+                    for (let s = 1; s <= 5; s++) {
+                        const t = s / 5;
+                        const ex = hx + Math.cos(angle) * ballR * 2.5 * t + (Math.random() - 0.5) * 20;
+                        const ey = hy + Math.sin(angle) * ballR * 2.5 * t + (Math.random() - 0.5) * 20;
+                        fxCtx.lineTo(ex, ey);
+                        lx = ex; ly = ey;
+                    }
+                    fxCtx.stroke();
+                }
+                fxCtx.shadowBlur = 0;
+            }
+
+            // 豪火球 2D 尾焰
+            if (state.jutsu === 'katon') {
+                const px = (1 - state.pos.x) * fxW, py = state.pos.y * fxH;
+                const r = state.size * Math.min(fxW, fxH) * 0.5;
+                if (Math.random() < 0.6) spawnFireEmber(px + (Math.random() - 0.5) * r, py + (Math.random() - 0.5) * r);
+
+                fxCtx.shadowBlur = 40;
+                fxCtx.shadowColor = '#ff4400';
+                const grad = fxCtx.createRadialGradient(px, py, 0, px, py, r);
+                grad.addColorStop(0, 'rgba(255,255,200,0.9)');
+                grad.addColorStop(0.3, 'rgba(255,120,0,0.7)');
+                grad.addColorStop(0.7, 'rgba(255,40,0,0.35)');
+                grad.addColorStop(1, 'rgba(100,0,0,0)');
+                fxCtx.fillStyle = grad;
+                fxCtx.beginPath();
+                fxCtx.arc(px, py, r, 0, Math.PI * 2);
+                fxCtx.fill();
+            }
+
+            // 粒子更新
+            for (let i = sparks.length - 1; i >= 0; i--) {
+                const s = sparks[i];
+                s.x += s.vx; s.y += s.vy; s.life -= 0.04;
+                if (s.life <= 0) { sparks.splice(i, 1); continue; }
+                fxCtx.globalAlpha = s.life;
+                fxCtx.fillStyle = '#aaf0ff';
+                fxCtx.beginPath();
+                if (s.type === 'bird') {
+                    fxCtx.moveTo(s.x, s.y);
+                    fxCtx.lineTo(s.x - s.vx * 2, s.y - s.vy * 2 + 3);
+                    fxCtx.lineTo(s.x - s.vx * 2, s.y - s.vy * 2 - 3);
+                } else {
+                    fxCtx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+                }
+                fxCtx.fill();
+            }
+
+            for (let i = fireParticles.length - 1; i >= 0; i--) {
+                const f = fireParticles[i];
+                f.x += f.vx; f.y += f.vy; f.vy += 0.05; f.life -= 0.025;
+                if (f.life <= 0) { fireParticles.splice(i, 1); continue; }
+                fxCtx.globalAlpha = f.life;
+                fxCtx.fillStyle = `hsl(${f.hue},100%,${50 + f.life * 30}%)`;
+                fxCtx.beginPath();
+                fxCtx.arc(f.x, f.y, f.size * f.life, 0, Math.PI * 2);
+                fxCtx.fill();
+            }
+
+            fxCtx.globalAlpha = 1;
+            fxCtx.shadowBlur = 0;
+            fxCtx.restore();
+        }
+
+        // ─── 3D 动画 ───
+        function animate3D() {
+            requestAnimationFrame(animate3D);
+            state.time += 0.016;
+
+            const vf = camera.fov * Math.PI / 180;
+            const vh = 2 * Math.tan(vf / 2) * CAMERA_Z;
+            const w = worldPos(state.pos.x, state.pos.y);
+            const scale = state.size * vh;
+
+            rasenganGroup.visible = state.jutsu === 'rasengan';
+            chidoriGroup.visible = state.jutsu === 'chidori';
+            katonGroup.visible = state.jutsu === 'katon';
+
+            if (state.jutsu === 'rasengan') {
+                rasenganGroup.position.lerp(new THREE.Vector3(w.x, w.y, 0), 0.25);
+                const s = scale * (1.2 + state.chakra * 0.4);
+                rasenganGroup.scale.lerp(new THREE.Vector3(s, s, s), 0.28);
+                rasenganGroup.children.forEach((c, i) => {
+                    if (c.userData.layer !== undefined) {
+                        const dir = c.userData.layer % 2 === 0 ? 1 : -1;
+                        c.rotation.z = state.time * (3 + c.userData.layer * 0.8) * dir;
+                    } else if (i === rasenganGroup.children.length - 2) {
+                        c.rotation.z = state.time * 5;
+                    } else if (i === rasenganGroup.children.length - 1) {
+                        c.rotation.z = -state.time * 2;
+                    }
+                });
+                rasenganGroup.rotation.x = Math.sin(state.time * 2) * 0.1;
+            }
+
+            if (state.jutsu === 'chidori') {
+                chidoriGroup.position.lerp(new THREE.Vector3(w.x, w.y, 0), 0.3);
+                const s = scale * 1.1;
+                chidoriGroup.scale.lerp(new THREE.Vector3(s, s, s), 0.28);
+                chidoriGroup.rotation.z = state.handAngle;
+                state.shake = Math.max(state.shake, 3 + state.chakra * 4);
+
+                chidoriGroup.bolts.forEach((bolt, i) => {
+                    const angle = (i / chidoriGroup.bolts.length) * Math.PI * 2 + state.time * 12;
+                    const len = 0.2 + Math.random() * 0.25;
+                    const ex = Math.cos(angle) * len, ey = Math.sin(angle) * len;
+                    const pos = genBoltPoints(0, 0, ex, ey, 8 + Math.floor(Math.random() * 4));
+                    bolt.geometry.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+                    bolt.geometry.attributes.position.needsUpdate = true;
+                    bolt.material.opacity = 0.6 + Math.random() * 0.4;
+                });
+            }
+
+            if (state.jutsu === 'katon') {
+                katonGroup.position.lerp(new THREE.Vector3(w.x, w.y, 0), 0.15);
+                const pulse = 1 + Math.sin(state.time * 4) * 0.06;
+                const s = scale * pulse * (1 + state.chakra * 0.2);
+                katonGroup.scale.lerp(new THREE.Vector3(s, s, s), 0.12);
+                katonGroup.rotation.z = state.time * 0.5;
+                if (katonGroup.flames) {
+                    katonGroup.flames.forEach((flame, i) => {
+                        const a = (i / katonGroup.flames.length) * Math.PI * 2 + state.time * 3;
+                        const r = 0.2 + Math.sin(state.time * 5 + i) * 0.05;
+                        const pos = [];
+                        for (let j = 0; j < 20; j++) {
+                            const t = j / 20;
+                            pos.push(Math.cos(a) * r * t, Math.sin(a) * r * t + t * 0.15, (Math.random() - 0.5) * 0.05);
+                        }
+                        flame.geometry.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+                        flame.geometry.attributes.position.needsUpdate = true;
+                    });
+                }
+            }
+
+            drawFX2D();
+            renderer.render(scene, camera);
+        }
+
+        // ─── UI ───
+        function showJutsuPopup(name) {
+            const info = JUTSU[name];
+            if (!info || !info.jp) return;
+            const pop = document.getElementById('jutsu-popup');
+            document.getElementById('jutsu-jp').textContent = info.jp;
+            document.getElementById('jutsu-jp').style.color = info.color;
+            document.getElementById('jutsu-jp').style.textShadow = `0 0 30px ${info.color}, 4px 4px 0 rgba(0,0,0,0.8)`;
+            document.getElementById('jutsu-cn').textContent = info.cn;
+            pop.classList.add('show');
+            clearTimeout(state.popupTimer);
+            state.popupTimer = setTimeout(() => pop.classList.remove('show'), 1200);
+        }
+
+        function setHUD(text, color = '#f4c095') {
+            const h = document.getElementById('hud');
+            h.textContent = text;
+            h.style.color = color;
+            h.style.borderColor = color === '#f4c095' ? '#e85d04' : color;
+        }
+
+        function setOverlay(jutsu) {
+            const el = document.getElementById('dark-overlay');
+            if (jutsu === 'rasengan') el.style.background = 'radial-gradient(ellipse at center, rgba(0,30,60,0.4) 0%, rgba(0,5,15,0.82) 75%)';
+            else if (jutsu === 'chidori') el.style.background = 'radial-gradient(ellipse at center, rgba(0,40,80,0.35) 0%, rgba(0,5,20,0.85) 75%)';
+            else if (jutsu === 'katon') el.style.background = 'radial-gradient(ellipse at center, rgba(60,20,0,0.4) 0%, rgba(15,5,0,0.82) 75%)';
+            else el.style.background = 'radial-gradient(ellipse at center, rgba(20,12,4,0.35) 0%, rgba(5,3,1,0.78) 75%)';
+        }
+
+        function onHandsResults(landmarksList) {
+            state.allHands = landmarksList;
+            state.landmarks = landmarksList[0] || null;
+
+            const jutsu = detectJutsu(landmarksList);
+            if (jutsu !== state.prevJutsu && jutsu !== 'idle') {
+                showJutsuPopup(jutsu);
+                // 切换忍术时立即重置特效尺寸，避免从 0 缓动
+                if (jutsu === 'rasengan') rasenganGroup.scale.set(0.5, 0.5, 0.5);
+                if (jutsu === 'chidori') chidoriGroup.scale.set(0.5, 0.5, 0.5);
+            }
+            state.prevJutsu = jutsu;
+            state.jutsu = jutsu;
+
+            if (jutsu !== 'idle') {
+                state.chakra = Math.min(1, state.chakra + 0.025);
+                updateJutsuTarget(landmarksList, jutsu);
+            } else {
+                state.chakra = Math.max(0, state.chakra - 0.03);
+            }
+
+            document.getElementById('chakra-bar').style.width = (state.chakra * 100) + '%';
+            setOverlay(jutsu);
+
+            const debugEl = document.getElementById('debug-info');
+            if (debugEl) debugEl.textContent = getGestureDebug(landmarksList);
+
+            const msgs = {
+                rasengan: '✦ 螺旋丸！查克拉旋转中...',
+                chidori:  '✦ 千鸟！雷切凝聚于指尖！',
+                katon:    '✦ 豪火球之术！',
+                idle:     landmarksList.length ? '试试：食指竖起=千鸟 / 双手合拢=螺旋丸' : '请将手放入画面'
+            };
+            const colors = { rasengan: '#4dc9ff', chidori: '#66ccff', katon: '#ff6b00', idle: '#f4c095' };
+            setHUD(msgs[jutsu], colors[jutsu]);
+        }
+
+        async function start() {
+            document.getElementById('intro-panel').style.display = 'none';
+            document.getElementById('hud').style.display = 'block';
+            document.getElementById('chakra-bar-wrap').style.display = 'block';
+            document.getElementById('gesture-hint').style.display = 'block';
+
+            const fxCanvas = document.getElementById('fx-canvas');
+            fxCtx = fxCanvas.getContext('2d');
+            fxW = window.innerWidth; fxH = window.innerHeight;
+            fxCanvas.width = fxW; fxCanvas.height = fxH;
+
+            try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (_) {}
+
+            try {
+                initThree();
+                if (!navigator.mediaDevices?.getUserMedia) throw new Error('需要 HTTPS 或本地服务器环境');
+
+                const video = document.getElementById('input-video');
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'user', width: 1280, height: 720 }
+                });
+                video.srcObject = stream;
+                await new Promise(r => video.onloadedmetadata = r);
+                video.play();
+
+                setHUD('加载查克拉感知引擎...');
+
+                const hands = new Hands({
+                    locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+                });
+                hands.setOptions({
+                    maxNumHands: 2, modelComplexity: 1,
+                    minDetectionConfidence: 0.5, minTrackingConfidence: 0.5
+                });
+                hands.onResults(r => onHandsResults(r.multiHandLandmarks || []));
+
+                const cam = new Camera(video, {
+                    onFrame: async () => { await hands.send({ image: video }); },
+                    width: 1280, height: 720
+                });
+                await cam.start();
+                setHUD('忍者就绪 — 开始结印！');
+
+            } catch (err) {
+                console.error(err);
+                setHUD('启动失败: ' + err.message, '#ff3333');
+            }
+        }
+
+        document.getElementById('start-btn').addEventListener('click', () => {
+            if (audioCtx?.state === 'suspended') audioCtx.resume();
+            start();
+        });
+
+        window.addEventListener('resize', () => {
+            fxW = window.innerWidth; fxH = window.innerHeight;
+            const fx = document.getElementById('fx-canvas');
+            if (fx) { fx.width = fxW; fx.height = fxH; }
+            if (camera && renderer) {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+        });
+    </script>
+</body>
+</html>

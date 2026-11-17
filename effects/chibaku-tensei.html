@@ -1,0 +1,826 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>地爆天星 · 震感领域</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #000; }
+
+        #input-video {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            object-fit: cover; z-index: 0; transform: scaleX(-1);
+            transition: filter 0.3s;
+        }
+
+        #dark-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 5; pointer-events: none;
+            background: radial-gradient(ellipse at center, rgba(20, 0, 40, 0.5) 0%, rgba(0, 0, 0, 0.82) 100%);
+            transition: background 0.4s ease, opacity 1s ease;
+        }
+
+        #growth-bar-wrap {
+            position: absolute; bottom: 7rem; left: 50%; transform: translateX(-50%);
+            width: 60%; max-width: 500px; pointer-events: none;
+            opacity: 0; transition: opacity 0.5s;
+        }
+        #growth-bar-wrap.visible { opacity: 1; }
+        #growth-bar-bg {
+            height: 8px; border-radius: 4px;
+            background: rgba(30, 0, 50, 0.8);
+            border: 1px solid rgba(150, 60, 255, 0.5);
+            overflow: hidden;
+        }
+        #growth-bar-fill {
+            height: 100%; width: 0%;
+            background: linear-gradient(90deg, #6622cc, #ff44ff, #ffffff);
+            box-shadow: 0 0 20px #9944ff;
+            transition: width 0.1s linear;
+        }
+        #growth-label {
+            text-align: center; margin-top: 8px;
+            font-size: 0.85rem; letter-spacing: 4px;
+            color: #bb88ff; text-shadow: 0 0 10px #6622aa;
+        }
+
+        #shake-wrapper {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 1; will-change: transform;
+        }
+
+        #canvas-container {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 10; pointer-events: none;
+        }
+
+        #ui-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 20; pointer-events: none;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+        }
+
+        #intro-panel {
+            pointer-events: auto;
+            background: rgba(8, 0, 18, 0.9);
+            padding: 50px; border-radius: 15px;
+            border: 1px solid #7b2fff;
+            text-align: center;
+            box-shadow: 0 0 80px rgba(120, 40, 255, 0.25), inset 0 0 60px rgba(60, 0, 120, 0.3);
+            backdrop-filter: blur(10px);
+        }
+
+        .btn-chakra {
+            background: #120020;
+            border: 2px solid #9944ff;
+            color: #cc88ff;
+            padding: 15px 60px;
+            font-size: 1.5rem; font-weight: bold;
+            cursor: pointer;
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            border-radius: 8px;
+            text-shadow: 0 0 12px #9944ff;
+            box-shadow: inset 0 0 20px #440066, 0 0 30px rgba(150, 60, 255, 0.3);
+            letter-spacing: 6px;
+        }
+        .btn-chakra:hover {
+            background: #6622aa;
+            color: #fff;
+            box-shadow: 0 0 50px #9944ff, inset 0 0 30px #cc88ff;
+            transform: scale(1.05) translateY(-2px);
+            text-shadow: none;
+        }
+
+        #hud-status { transition: all 0.3s; max-width: 80%; text-align: center; }
+
+        .chakra-ring {
+            position: absolute; border-radius: 50%;
+            border: 2px solid rgba(150, 60, 255, 0.4);
+            pointer-events: none; z-index: 15;
+            animation: pulse-ring 2s ease-out infinite;
+        }
+        @keyframes pulse-ring {
+            0% { transform: scale(0.8); opacity: 0.8; }
+            100% { transform: scale(2.5); opacity: 0; }
+        }
+    </style>
+
+    <script type="importmap">
+        { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+</head>
+
+<body>
+    <div id="shake-wrapper">
+        <video id="input-video" autoplay playsinline muted></video>
+        <div id="dark-overlay"></div>
+    </div>
+    <div id="canvas-container"></div>
+
+    <div id="ui-layer">
+        <div id="intro-panel">
+            <h1 class="text-6xl font-bold mb-3 tracking-widest" style="color:#9944ff; text-shadow: 0 0 30px #6622cc, 0 0 60px #440088;">地爆天星</h1>
+            <h2 class="text-xl mb-4 tracking-widest" style="color:#bb88ff; text-shadow: 0 0 10px #6622aa;">[ 万象天引 · 引力震域 ]</h2>
+            <p class="text-sm mb-8 tracking-wider" style="color:#8866aa;">单手凝聚小型引力核心 · 双手张开控制强度<br><span style="color:#ff88ff;">双手合十并保持 → 融合超巨型地爆天星，持续膨胀！</span></p>
+            <button id="start-btn" class="btn-chakra">发动忍术</button>
+        </div>
+        <div id="growth-bar-wrap">
+            <div id="growth-bar-bg"><div id="growth-bar-fill"></div></div>
+            <div id="growth-label">引力蓄能 0%</div>
+        </div>
+        <div id="hud-status" class="hidden absolute bottom-10 font-bold tracking-widest text-xl"
+             style="background: rgba(10,0,20,0.95); padding: 15px 40px; border: 1px solid #9944ff;
+                    box-shadow: 0 0 30px rgba(150,60,255,0.5); border-radius: 8px; color: #cc88ff;">
+            等待施术者连接...
+        </div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        const HANDS_DATA = [
+            { active: false, x: 0.5, y: 0.5, size: 0.2, intensity: 0, spread: 1 },
+            { active: false, x: 0.5, y: 0.5, size: 0.2, intensity: 0, spread: 1 }
+        ];
+
+        const FUSION = {
+            active: false,
+            holdTime: 0,
+            growth: 1,
+            centerX: 0.5,
+            centerY: 0.5,
+            mergeFactor: 0
+        };
+
+        let scene, camera, renderer;
+        let chibakuCores = [];
+        let megaCore = null;
+        let globalShockwaves = [];
+        let time = 0;
+        const CAMERA_Z = 10;
+        const BASE_FOV = 50;
+        let shakeIntensity = 0;
+        let lastShockTrigger = 0;
+
+        // ─── 纹理 ───
+        function getGlowTexture(colorInner, colorOuter) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 64; canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+            const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+            grad.addColorStop(0, colorInner);
+            grad.addColorStop(0.35, colorOuter);
+            grad.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, 64, 64);
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        function getRockTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 32; canvas.height = 32;
+            const ctx = canvas.getContext('2d');
+            const grad = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+            grad.addColorStop(0, 'rgba(200, 190, 180, 1)');
+            grad.addColorStop(0.5, 'rgba(120, 110, 100, 0.9)');
+            grad.addColorStop(1, 'rgba(60, 55, 50, 0)');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, 32, 32);
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        // ─── 几何生成 ───
+        function createRing(radius, count, jitter = 0) {
+            const pos = [];
+            for (let i = 0; i < count; i++) {
+                const angle = (i / count) * Math.PI * 2;
+                const r = radius + (Math.random() - 0.5) * jitter;
+                pos.push(Math.cos(angle) * r, Math.sin(angle) * r, 0);
+            }
+            return pos;
+        }
+
+        function createDebrisOrbit(count, innerR, outerR) {
+            const pos = [], sizes = [], phases = [], speeds = [];
+            for (let i = 0; i < count; i++) {
+                const r = innerR + Math.random() * (outerR - innerR);
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.acos(2 * Math.random() - 1);
+                pos.push(
+                    r * Math.sin(phi) * Math.cos(theta),
+                    r * Math.sin(phi) * Math.sin(theta),
+                    r * Math.cos(phi) * 0.4
+                );
+                sizes.push(0.04 + Math.random() * 0.12);
+                phases.push(Math.random() * Math.PI * 2);
+                speeds.push(0.3 + Math.random() * 1.2);
+            }
+            return { pos, sizes, phases, speeds };
+        }
+
+        function createRadialCracks(count, length, density) {
+            const pos = [];
+            for (let i = 0; i < count; i++) {
+                const angle = (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.15;
+                const cos = Math.cos(angle), sin = Math.sin(angle);
+                const pts = Math.floor(length * density);
+                for (let j = 0; j < pts; j++) {
+                    const t = j / pts;
+                    const r = t * length * (0.7 + Math.random() * 0.3);
+                    const wobble = (Math.random() - 0.5) * 0.06 * t;
+                    pos.push(cos * r + wobble, sin * r + wobble, -0.01);
+                }
+            }
+            return pos;
+        }
+
+        function buildGeometry(positions) {
+            const geom = new THREE.BufferGeometry();
+            geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            return geom;
+        }
+
+        // ─── 合十融合检测 ───
+        function detectFusion() {
+            if (!HANDS_DATA[0].active || !HANDS_DATA[1].active) return false;
+
+            const dx = HANDS_DATA[0].x - HANDS_DATA[1].x;
+            const dy = HANDS_DATA[0].y - HANDS_DATA[1].y;
+            const handDist = Math.sqrt(dx * dx + dy * dy);
+
+            const bothClosed = HANDS_DATA[0].spread < 0.22 && HANDS_DATA[1].spread < 0.22;
+            const veryClose = handDist < 0.18;
+
+            return bothClosed && veryClose;
+        }
+
+        function getFusionStage(growth) {
+            if (growth < 1.8) return { name: '双手共鸣 · 引力融合', pct: 15, color: '#bb88ff' };
+            if (growth < 3.0) return { name: '超重力核心 · 地表崩裂', pct: 40, color: '#ff66ff' };
+            if (growth < 5.0) return { name: '万象天引 · 岩石升空', pct: 65, color: '#ff44aa' };
+            if (growth < 8.0) return { name: '地爆天星 · 持续膨胀中', pct: 85, color: '#ff2266' };
+            return { name: '★ 究极地爆天星 · 吞噬一切 ★', pct: 100, color: '#ffffff' };
+        }
+
+        function updateGrowthUI(growth, stage) {
+            const wrap = document.getElementById('growth-bar-wrap');
+            const fill = document.getElementById('growth-bar-fill');
+            const label = document.getElementById('growth-label');
+            const pct = Math.min(100, ((growth - 1) / 9) * 100);
+            wrap.classList.add('visible');
+            fill.style.width = `${pct}%`;
+            label.innerText = `${stage.name}  [${Math.floor(pct)}%]`;
+            label.style.color = stage.color;
+            label.style.textShadow = `0 0 15px ${stage.color}`;
+        }
+
+        function hideGrowthUI() {
+            document.getElementById('growth-bar-wrap').classList.remove('visible');
+        }
+
+        // ─── 单个地爆天星核心 ───
+        function createChibakuCore(isMega = false) {
+            const group = new THREE.Group();
+            const glowTex = getGlowTexture('rgba(180, 80, 255, 1)', 'rgba(80, 20, 160, 0.6)');
+            const rockTex = getRockTexture();
+
+            // 黑色引力核心
+            const coreGeom = new THREE.SphereGeometry(0.18, 32, 32);
+            const coreMat = new THREE.MeshBasicMaterial({ color: 0x050508 });
+            const core = new THREE.Mesh(coreGeom, coreMat);
+            group.add(core);
+
+            // 核心紫色光晕
+            const coreGlow = new THREE.Points(
+                buildGeometry(createRing(0.22, 400, 0.02)),
+                new THREE.PointsMaterial({
+                    color: 0x9944ff, size: 0.08, map: glowTex,
+                    transparent: true, blending: THREE.AdditiveBlending,
+                    depthWrite: false, opacity: 0.9
+                })
+            );
+            group.add(coreGlow);
+
+            // 外层查克拉环
+            const chakraRing1 = new THREE.Points(
+                buildGeometry(createRing(0.35, 600, 0.04)),
+                new THREE.PointsMaterial({
+                    color: 0x6622cc, size: 0.06, map: glowTex,
+                    transparent: true, blending: THREE.AdditiveBlending,
+                    depthWrite: false, opacity: 0.7
+                })
+            );
+            const chakraRing2 = new THREE.Points(
+                buildGeometry(createRing(0.55, 800, 0.08)),
+                new THREE.PointsMaterial({
+                    color: 0x8833ff, size: 0.04, map: glowTex,
+                    transparent: true, blending: THREE.AdditiveBlending,
+                    depthWrite: false, opacity: 0.5
+                })
+            );
+            group.add(chakraRing1, chakraRing2);
+
+            // 轨道碎石
+            const debrisCount = isMega ? 2500 : 1200;
+            const debrisOuter = isMega ? 3.5 : 1.8;
+            const debrisData = createDebrisOrbit(debrisCount, 0.3, debrisOuter);
+            const debrisGeom = buildGeometry(debrisData.pos);
+            debrisGeom.setAttribute('size', new THREE.Float32BufferAttribute(debrisData.sizes, 1));
+            const debris = new THREE.Points(debrisGeom, new THREE.PointsMaterial({
+                color: 0x998877, size: 0.1, map: rockTex,
+                transparent: true, blending: THREE.NormalBlending,
+                depthWrite: false, opacity: 0.85,
+                sizeAttenuation: true
+            }));
+            debris.userData = { phases: debrisData.phases, speeds: debrisData.speeds, basePos: [...debrisData.pos] };
+            group.add(debris);
+
+            // 地表裂纹
+            const crackLen = isMega ? 5.0 : 2.5;
+            const crackCount = isMega ? 36 : 24;
+            const cracks = new THREE.Points(
+                buildGeometry(createRadialCracks(crackCount, crackLen, 80)),
+                new THREE.PointsMaterial({
+                    color: 0x443322, size: 0.05, map: rockTex,
+                    transparent: true, opacity: 0.6, depthWrite: false
+                })
+            );
+            group.add(cracks);
+
+            // 震荡波纹（多层）
+            const shockwaveMeshes = [];
+            const swCount = isMega ? 8 : 4;
+            for (let i = 0; i < swCount; i++) {
+                const sw = new THREE.Points(
+                    buildGeometry(createRing(0.5, 500, 0.05)),
+                    new THREE.PointsMaterial({
+                        color: 0xaa66ff, size: 0.07, map: glowTex,
+                        transparent: true, blending: THREE.AdditiveBlending,
+                        depthWrite: false, opacity: 0
+                    })
+                );
+                sw.userData = { phase: i * (1 / swCount), speed: isMega ? 1.2 : 0.6 };
+                shockwaveMeshes.push(sw);
+                group.add(sw);
+            }
+
+            // 上升尘土
+            const dustPos = [];
+            const dustN = isMega ? 1500 : 600;
+            const dustR = isMega ? 4.5 : 2.0;
+            for (let i = 0; i < dustN; i++) {
+                const r = 0.5 + Math.random() * dustR;
+                const angle = Math.random() * Math.PI * 2;
+                dustPos.push(Math.cos(angle) * r, Math.sin(angle) * r, Math.random() * 0.5);
+            }
+            const dust = new THREE.Points(
+                buildGeometry(dustPos),
+                new THREE.PointsMaterial({
+                    color: 0x665544, size: 0.06, map: rockTex,
+                    transparent: true, opacity: 0.4, depthWrite: false
+                })
+            );
+            dust.userData = { basePos: [...dustPos] };
+            group.add(dust);
+
+            group.visible = false;
+            // 巨型外环（仅 mega）
+            let outerShell = null;
+            if (isMega) {
+                outerShell = new THREE.Points(
+                    buildGeometry(createRing(2.2, 1200, 0.15)),
+                    new THREE.PointsMaterial({
+                        color: 0x5511aa, size: 0.1, map: glowTex,
+                        transparent: true, blending: THREE.AdditiveBlending,
+                        depthWrite: false, opacity: 0.4
+                    })
+                );
+                group.add(outerShell);
+            }
+
+            group.userData = {
+                core, coreGlow, chakraRing1, chakraRing2,
+                debris, cracks, shockwaveMeshes, dust,
+                outerShell, isMega,
+                pulsePhase: Math.random() * Math.PI * 2
+            };
+            return group;
+        }
+
+        // ─── 全屏地面震荡波 ───
+        function createGlobalShockwave() {
+            const glowTex = getGlowTexture('rgba(200, 100, 255, 0.8)', 'rgba(100, 40, 200, 0)');
+            const geom = buildGeometry(createRing(1, 800, 0.1));
+            const mat = new THREE.PointsMaterial({
+                color: 0xbb66ff, size: 0.12, map: glowTex,
+                transparent: true, blending: THREE.AdditiveBlending,
+                depthWrite: false, opacity: 0
+            });
+            const mesh = new THREE.Points(geom, mat);
+            mesh.userData = { life: 0, maxLife: 2.5, active: false };
+            return mesh;
+        }
+
+        function initThree() {
+            const container = document.getElementById('canvas-container');
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
+            camera.position.z = CAMERA_Z;
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            container.appendChild(renderer.domElement);
+
+            for (let i = 0; i < 2; i++) {
+                const core = createChibakuCore(false);
+                scene.add(core);
+                chibakuCores.push(core);
+            }
+
+            megaCore = createChibakuCore(true);
+            megaCore.visible = false;
+            scene.add(megaCore);
+
+            for (let i = 0; i < 6; i++) {
+                const sw = createGlobalShockwave();
+                sw.position.z = -2;
+                scene.add(sw);
+                globalShockwaves.push(sw);
+            }
+
+            animate();
+        }
+
+        function animateDebris(debris, t, intensity) {
+            const base = debris.userData.basePos;
+            const phases = debris.userData.phases;
+            const speeds = debris.userData.speeds;
+            const pos = debris.geometry.attributes.position.array;
+            const count = phases.length;
+
+            for (let i = 0; i < count; i++) {
+                const bi = i * 3;
+                const bx = base[bi], by = base[bi + 1], bz = base[bi + 2];
+                const dist = Math.sqrt(bx * bx + by * by + bz * bz);
+                const orbitSpeed = speeds[i] * (1 + intensity * 2);
+                const angle = phases[i] + t * orbitSpeed;
+
+                const pullFactor = 1 - Math.min(0.6, t * 0.02 * intensity);
+                const r = dist * pullFactor;
+                const wobble = Math.sin(t * 3 + phases[i]) * 0.05 * intensity;
+
+                const nx = Math.cos(angle) * r + wobble;
+                const ny = Math.sin(angle) * r + wobble;
+                const nz = bz * pullFactor + Math.sin(t * 2 + phases[i]) * 0.1;
+
+                pos[bi] = nx;
+                pos[bi + 1] = ny;
+                pos[bi + 2] = nz;
+            }
+            debris.geometry.attributes.position.needsUpdate = true;
+        }
+
+        function animateDust(dust, t, intensity) {
+            const base = dust.userData.basePos;
+            const pos = dust.geometry.attributes.position.array;
+            for (let i = 0; i < base.length / 3; i++) {
+                const bi = i * 3;
+                pos[bi] = base[bi] + Math.sin(t + i) * 0.03;
+                pos[bi + 1] = base[bi + 1] + Math.cos(t * 0.7 + i) * 0.03;
+                pos[bi + 2] = base[bi + 2] + Math.sin(t * 2 + i * 0.1) * 0.15 * intensity;
+            }
+            dust.geometry.attributes.position.needsUpdate = true;
+        }
+
+        function animateShockwaves(meshes, t, intensity) {
+            meshes.forEach(sw => {
+                const cycle = ((t * sw.userData.speed + sw.userData.phase) % 1);
+                const scale = 0.3 + cycle * 3.5 * (0.5 + intensity);
+                sw.scale.set(scale, scale, 1);
+                sw.material.opacity = Math.max(0, (1 - cycle) * 0.7 * intensity);
+            });
+        }
+
+        function triggerGlobalShockwave(intensity) {
+            const available = globalShockwaves.find(s => !s.userData.active);
+            if (available && intensity > 0.3) {
+                available.userData.active = true;
+                available.userData.life = 0;
+                available.material.opacity = 0.8 * intensity;
+                available.scale.set(0.1, 0.1, 1);
+            }
+        }
+
+        function applyScreenShake(extra = 0) {
+            const wrapper = document.getElementById('shake-wrapper');
+            const canvas = document.getElementById('canvas-container');
+            const power = shakeIntensity + extra;
+            const sx = (Math.random() - 0.5) * power * 18;
+            const sy = (Math.random() - 0.5) * power * 18;
+            const rot = (Math.random() - 0.5) * power * 1.2;
+            const transform = `translate(${sx}px, ${sy}px) rotate(${rot}deg) scale(${1 + power * 0.02})`;
+            wrapper.style.transform = transform;
+            canvas.style.transform = transform;
+
+            const video = document.getElementById('input-video');
+            video.style.filter = `contrast(${1 + power * 0.2}) saturate(${0.7 + power * 0.3}) brightness(${1 - power * 0.15})`;
+
+            const overlay = document.getElementById('dark-overlay');
+            const darkness = 0.82 + power * 0.15;
+            const purple = 40 + power * 60;
+            overlay.style.background = `radial-gradient(ellipse at center, rgba(${purple}, 0, ${purple * 2}, ${0.3 + power * 0.4}) 0%, rgba(0, 0, 0, ${darkness}) 100%)`;
+        }
+
+        function animateCore(core, targetX, targetY, baseScale, intensity, growthMul = 1) {
+            const ud = core.userData;
+            core.position.x += (targetX - core.position.x) * 0.12;
+            core.position.y += (targetY - core.position.y) * 0.12;
+
+            const pulse = 1.0 + Math.sin(time * 8 + ud.pulsePhase) * 0.05 * intensity;
+            const tremor = 1.0 + Math.sin(time * 30) * 0.025 * intensity;
+            const finalScale = baseScale * growthMul * pulse * tremor;
+            core.scale.lerp(new THREE.Vector3(finalScale, finalScale, 1), 0.12);
+
+            ud.core.scale.setScalar(1 + Math.sin(time * 6) * 0.1 * intensity * growthMul);
+            ud.coreGlow.rotation.z = time * (0.5 + growthMul * 0.3);
+            ud.chakraRing1.rotation.z = time * (0.8 + growthMul * 0.2);
+            ud.chakraRing2.rotation.z = -time * (1.2 + growthMul * 0.3);
+            ud.chakraRing1.rotation.x = Math.sin(time * 0.5) * 0.3 * growthMul;
+            ud.chakraRing2.rotation.y = Math.cos(time * 0.7) * 0.4 * growthMul;
+
+            if (ud.outerShell) {
+                ud.outerShell.rotation.z = -time * 0.4;
+                ud.outerShell.material.opacity = 0.3 + Math.min(0.7, growthMul * 0.08);
+            }
+
+            animateDebris(ud.debris, time, intensity * growthMul);
+            animateDust(ud.dust, time, intensity * growthMul);
+            animateShockwaves(ud.shockwaveMeshes, time, intensity * growthMul);
+
+            ud.cracks.material.opacity = 0.3 + intensity * 0.5 * growthMul;
+            ud.cracks.rotation.z = time * 0.05;
+            core.rotation.z = Math.sin(time * 1.5) * 0.1 * intensity;
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const dt = 0.016;
+            time += dt;
+
+            const vFov = camera.fov * Math.PI / 180;
+            const viewHeight = 2 * Math.tan(vFov / 2) * CAMERA_Z;
+            const viewWidth = viewHeight * camera.aspect;
+
+            let totalIntensity = 0;
+            let activeCount = 0;
+            const isFusing = detectFusion();
+
+            if (isFusing) {
+                FUSION.mergeFactor = Math.min(1, FUSION.mergeFactor + dt * 3);
+                FUSION.holdTime += dt;
+                FUSION.growth += dt * (1.0 + FUSION.holdTime * 0.25);
+                FUSION.centerX += ((HANDS_DATA[0].x + HANDS_DATA[1].x) / 2 - FUSION.centerX) * 0.15;
+                FUSION.centerY += ((HANDS_DATA[0].y + HANDS_DATA[1].y) / 2 - FUSION.centerY) * 0.15;
+                FUSION.active = true;
+            } else {
+                FUSION.mergeFactor = Math.max(0, FUSION.mergeFactor - dt * 2);
+                if (FUSION.mergeFactor <= 0) {
+                    FUSION.active = false;
+                    FUSION.holdTime = 0;
+                    FUSION.growth = Math.max(1, FUSION.growth - dt * 0.8);
+                }
+            }
+
+            // ── 合十融合模式：巨型地爆天星 ──
+            if (FUSION.mergeFactor > 0.1 && megaCore) {
+                const ud = megaCore.userData;
+                megaCore.visible = true;
+
+                const fadeIn = FUSION.mergeFactor;
+                const growthMul = FUSION.growth * fadeIn;
+
+                const targetX = (FUSION.centerX - 0.5) * viewWidth;
+                const targetY = -(FUSION.centerY - 0.5) * viewHeight;
+                const fusionIntensity = Math.min(2, 0.8 + FUSION.holdTime * 0.3);
+                totalIntensity = fusionIntensity * Math.min(3, growthMul * 0.4);
+
+                const baseScale = viewHeight * 0.45 * (1 + FUSION.holdTime * 0.12);
+                animateCore(megaCore, targetX, targetY, baseScale, fusionIntensity, growthMul);
+
+                // 隐藏双手小核心
+                chibakuCores.forEach(c => {
+                    c.visible = false;
+                    c.scale.lerp(new THREE.Vector3(0.01, 0.01, 1), 0.2);
+                });
+
+                // 持续触发全屏冲击波
+                const shockInterval = Math.max(0.08, 0.6 - FUSION.growth * 0.06);
+                if (time - lastShockTrigger > shockInterval) {
+                    triggerGlobalShockwave(Math.min(1, fusionIntensity * 0.5));
+                    lastShockTrigger = time;
+                }
+
+                // 摄像机拉远营造巨型感
+                const targetFov = BASE_FOV + Math.min(25, (growthMul - 1) * 4);
+                camera.fov += (targetFov - camera.fov) * 0.05;
+                camera.updateProjectionMatrix();
+
+                const stage = getFusionStage(FUSION.growth);
+                updateGrowthUI(FUSION.growth, stage);
+            } else {
+                hideGrowthUI();
+                if (megaCore) {
+                    megaCore.visible = false;
+                    megaCore.scale.lerp(new THREE.Vector3(0.01, 0.01, 1), 0.15);
+                }
+                camera.fov += (BASE_FOV - camera.fov) * 0.05;
+                camera.updateProjectionMatrix();
+
+                // ── 普通双手模式 ──
+                for (let i = 0; i < 2; i++) {
+                    const core = chibakuCores[i];
+                    const data = HANDS_DATA[i];
+
+                    if (data.active) {
+                        core.visible = true;
+                        activeCount++;
+
+                        const targetX = (data.x - 0.5) * viewWidth;
+                        const targetY = -(data.y - 0.5) * viewHeight;
+                        const intensity = Math.min(1, data.size * 4);
+                        data.intensity = intensity;
+                        totalIntensity += intensity;
+
+                        const baseScale = data.size * viewHeight * 0.7;
+                        animateCore(core, targetX, targetY, baseScale, intensity);
+
+                        if (Math.floor(time * 2) !== Math.floor((time - dt) * 2) && intensity > 0.5) {
+                            triggerGlobalShockwave(intensity);
+                        }
+                    } else {
+                        data.intensity = 0;
+                        core.scale.lerp(new THREE.Vector3(0.01, 0.01, 1), 0.12);
+                        if (core.scale.x < 0.05) core.visible = false;
+                    }
+                }
+            }
+
+            // 全屏震荡波
+            globalShockwaves.forEach(sw => {
+                if (sw.userData.active) {
+                    sw.userData.life += dt;
+                    const t = sw.userData.life / sw.userData.maxLife;
+                    const expand = FUSION.active ? 25 : 15;
+                    const scale = 0.1 + t * expand;
+                    sw.scale.set(scale, scale * (viewWidth / viewHeight), 1);
+                    sw.material.opacity = Math.max(0, (1 - t) * (FUSION.active ? 0.9 : 0.6));
+                    if (t >= 1) sw.userData.active = false;
+                }
+            });
+
+            // 震感
+            const fusionShake = FUSION.active ? Math.min(2.5, FUSION.growth * 0.25) : 0;
+            const targetShake = Math.min(2.5, totalIntensity * 0.4 + fusionShake);
+            shakeIntensity += (targetShake - shakeIntensity) * 0.12;
+            if (shakeIntensity > 0.02) {
+                applyScreenShake(FUSION.active ? FUSION.growth * 0.1 : 0);
+            } else {
+                document.getElementById('shake-wrapper').style.transform = '';
+                document.getElementById('canvas-container').style.transform = '';
+                document.getElementById('input-video').style.filter = '';
+                document.getElementById('dark-overlay').style.background = '';
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        function updateHUD(text, color = "#cc88ff") {
+            const hud = document.getElementById('hud-status');
+            hud.innerText = text;
+            hud.style.color = color;
+            hud.style.borderColor = color;
+            hud.style.boxShadow = `0 0 30px ${color}88`;
+        }
+
+        async function startSystem() {
+            document.getElementById('intro-panel').style.display = 'none';
+            const hud = document.getElementById('hud-status');
+            hud.classList.remove('hidden');
+            updateHUD("正在凝聚查克拉...", "#9944ff");
+
+            try {
+                initThree();
+
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    throw new Error("请在本地服务器(Live Server)或 HTTPS 环境下运行本页面！");
+                }
+
+                updateHUD("请求视觉权限中 (请在弹窗点允许)...", "#9944ff");
+                const videoElement = document.getElementById('input-video');
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'user', width: 1280, height: 720 }
+                });
+                videoElement.srcObject = stream;
+                await new Promise(resolve => videoElement.onloadedmetadata = resolve);
+                videoElement.play();
+
+                updateHUD("加载万象天引感知引擎中 (约 10-20 秒)...", "#bb66ff");
+                const hands = new Hands({
+                    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+                });
+                hands.setOptions({
+                    maxNumHands: 2, modelComplexity: 1,
+                    minDetectionConfidence: 0.6, minTrackingConfidence: 0.6
+                });
+
+                hands.onResults((results) => {
+                    HANDS_DATA.forEach(h => h.active = false);
+
+                    if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                        const count = results.multiHandLandmarks.length;
+                        let totalSize = 0;
+
+                        results.multiHandLandmarks.forEach((landmarks, index) => {
+                            if (index < 2) {
+                                const wrist = landmarks[0];
+                                const middleBase = landmarks[9];
+                                const middleTip = landmarks[12];
+                                const thumbTip = landmarks[4];
+                                const indexTip = landmarks[8];
+                                const pinkyTip = landmarks[20];
+
+                                HANDS_DATA[index].active = true;
+                                HANDS_DATA[index].x = 1.0 - (wrist.x + middleBase.x) / 2;
+                                HANDS_DATA[index].y = (wrist.y + middleBase.y) / 2;
+
+                                const spreadDx = thumbTip.x - indexTip.x;
+                                const spreadDy = thumbTip.y - indexTip.y;
+                                const spread = Math.sqrt(spreadDx * spreadDx + spreadDy * spreadDy);
+                                HANDS_DATA[index].spread = spread;
+
+                                const reachDx = wrist.x - middleTip.x;
+                                const reachDy = wrist.y - middleTip.y;
+                                const reach = Math.sqrt(reachDx * reachDx + reachDy * reachDy);
+
+                                const fingerSpan = Math.hypot(indexTip.x - pinkyTip.x, indexTip.y - pinkyTip.y);
+                                HANDS_DATA[index].size = spread * 0.5 + reach * 0.3 + fingerSpan * 0.2;
+                                totalSize += HANDS_DATA[index].size;
+                            }
+                        });
+
+                        if (detectFusion()) {
+                            const stage = getFusionStage(FUSION.growth);
+                            const holdSec = FUSION.holdTime.toFixed(1);
+                            updateHUD(`合十蓄能 ${holdSec}s · 倍率 ×${FUSION.growth.toFixed(1)} · 保持合十继续膨胀！`, stage.color);
+                        } else if (count === 2) {
+                            const dx = HANDS_DATA[0].x - HANDS_DATA[1].x;
+                            const dy = HANDS_DATA[0].y - HANDS_DATA[1].y;
+                            const dist = Math.sqrt(dx * dx + dy * dy);
+                            if (dist < 0.2) {
+                                updateHUD('双手靠近中 · 合十合并可发动巨型地爆天星！', '#ffaa44');
+                            } else {
+                                const avg = totalSize / count;
+                                updateHUD(`双引力点运作中 · 张开手掌增强 · 合十可融合`, avg > 0.3 ? '#ff66ff' : '#00ffaa');
+                            }
+                        } else {
+                            const avg = totalSize / count;
+                            let statusText = '地爆天星凝聚中';
+                            if (avg > 0.35) statusText += ' · 引力极强';
+                            else if (avg > 0.2) statusText += ' · 震荡加剧';
+                            statusText += ' · 双手合十可融合巨型核心';
+                            updateHUD(statusText, avg > 0.3 ? '#ff66ff' : '#00ffaa');
+                        }
+                    } else {
+                        updateHUD("引力消散 (未检测到施术者)", "#ff4466");
+                    }
+                });
+
+                const cameraUtils = new Camera(videoElement, {
+                    onFrame: async () => { await hands.send({ image: videoElement }); },
+                    width: 1280, height: 720
+                });
+                await cameraUtils.start();
+
+            } catch (err) {
+                console.error(err);
+                updateHUD(`忍术失败: ${err.message}`, "#ff0000");
+            }
+        }
+
+        document.getElementById('start-btn').addEventListener('click', startSystem);
+
+        window.addEventListener('resize', () => {
+            if (camera && renderer) {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+        });
+    </script>
+</body>
+</html>

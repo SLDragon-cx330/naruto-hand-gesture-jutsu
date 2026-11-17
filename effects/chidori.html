@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>千鸟 · Chidori</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@700;900&display=swap');
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #020818; font-family: 'Noto Sans JP', sans-serif; }
+        #input-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; transform: scaleX(-1); }
+        #dark-overlay { position: absolute; inset: 0; z-index: 5; pointer-events: none; background: radial-gradient(ellipse at center, rgba(0,40,80,0.35) 0%, rgba(0,5,20,0.85) 75%); transition: background 0.5s; }
+        #canvas-container { position: absolute; inset: 0; z-index: 10; pointer-events: none; }
+        #fx-canvas { position: absolute; inset: 0; z-index: 12; pointer-events: none; transform: scaleX(-1); }
+        #ui-layer { position: absolute; inset: 0; z-index: 20; pointer-events: none; display: flex; justify-content: center; align-items: center; }
+        #intro-panel { pointer-events: auto; background: rgba(4,12,28,0.92); padding: 44px 48px; border-radius: 4px; border: 3px solid #66ccff; text-align: center; max-width: 92vw; box-shadow: 0 0 60px rgba(102,204,255,0.3); }
+        .title { font-size: 2.6rem; font-weight: 900; color: #66ccff; text-shadow: 0 0 24px #66ccff; letter-spacing: 8px; }
+        .sub { color: #b8e8ff; margin: 10px 0 24px; letter-spacing: 3px; }
+        .hint { color: rgba(184,232,255,0.85); line-height: 2; font-size: 0.95rem; }
+        .btn { margin-top: 24px; background: linear-gradient(180deg, #2288cc, #1155aa); border: 2px solid #aaf0ff; color: #fff; padding: 14px 44px; font-size: 1.1rem; font-weight: 900; cursor: pointer; letter-spacing: 6px; box-shadow: 0 0 30px rgba(102,204,255,0.5); }
+        .btn:hover { transform: scale(1.03); }
+        #chakra-bar-wrap { position: absolute; top: 24px; left: 50%; transform: translateX(-50%); width: min(400px,82vw); display: none; }
+        #chakra-label { color: #66ccff; font-size: 0.75rem; letter-spacing: 4px; text-align: center; margin-bottom: 4px; }
+        #chakra-bar-bg { height: 10px; background: rgba(0,20,40,0.8); border: 1px solid rgba(102,204,255,0.5); border-radius: 2px; overflow: hidden; }
+        #chakra-bar { height: 100%; width: 0%; background: linear-gradient(90deg, #2288cc, #66ccff, #fff); box-shadow: 0 0 12px #66ccff; transition: width 0.12s; }
+        #hud { position: absolute; bottom: 32px; left: 50%; transform: translateX(-50%); background: rgba(4,12,28,0.92); border: 2px solid #66ccff; padding: 10px 28px; color: #b8e8ff; font-weight: bold; display: none; white-space: nowrap; }
+        #gesture-hint { position: absolute; top: 72px; right: 24px; display: none; background: rgba(4,12,28,0.88); border: 1px solid #66ccff; padding: 12px 16px; color: #b8e8ff; font-size: 0.82rem; line-height: 1.9; }
+        #jutsu-popup { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%) scale(0.6); opacity: 0; pointer-events: none; text-align: center; transition: all 0.35s cubic-bezier(0.34,1.56,0.64,1); }
+        #jutsu-popup.show { opacity: 1; transform: translate(-50%,-50%) scale(1); }
+        #jutsu-popup .jp { font-size: clamp(3rem,10vw,5rem); font-weight: 900; color: #66ccff; text-shadow: 0 0 30px #66ccff, 4px 4px 0 #000; letter-spacing: 8px; }
+        #jutsu-popup .cn { font-size: 1.1rem; color: rgba(255,255,255,0.8); letter-spacing: 6px; margin-top: 8px; }
+    </style>
+    <script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }</script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+</head>
+<body>
+    <video id="input-video" autoplay playsinline muted></video>
+    <div id="dark-overlay"></div>
+    <div id="canvas-container"></div>
+    <canvas id="fx-canvas"></canvas>
+    <div id="ui-layer">
+        <div id="intro-panel">
+            <div class="title">千鳥</div>
+            <div class="sub">CHIDORI · 雷切</div>
+            <div class="hint">☝️ 单手食指竖起<br>中指弯曲，查克拉凝聚于指尖</div>
+            <button class="btn" id="start-btn">开启忍术</button>
+        </div>
+        <div id="chakra-bar-wrap"><div id="chakra-label">チャクラ</div><div id="chakra-bar-bg"><div id="chakra-bar"></div></div></div>
+        <div id="gesture-hint">食指竖起指向镜头<br>指尖释放蓝色雷电<div id="debug-info" style="margin-top:6px;opacity:0.5;font-size:0.72rem"></div></div>
+        <div id="jutsu-popup"><div class="jp">千鳥</div><div class="cn">CHIDORI</div></div>
+        <div id="hud">等待手势...</div>
+    </div>
+    <script type="module">
+        import * as THREE from 'three';
+
+        const FINGER_DEFS = [
+            { key:'index', tip:8, pip:6, mcp:5, label:'食' },
+            { key:'middle', tip:12, pip:10, mcp:9, label:'中' },
+            { key:'ring', tip:16, pip:14, mcp:13, label:'无' },
+            { key:'pinky', tip:20, pip:18, mcp:17, label:'小' }
+        ];
+
+        const state = { active: false, chakra: 0, time: 0, pos: { x:0.5, y:0.5 }, size: 0.22, handAngle: 0, landmarks: null, shake: 0, popupTimer: 0 };
+        let scene, camera, renderer, effectGroup, fxCtx, fxW, fxH, audioCtx = null;
+        const CAMERA_Z = 10;
+        const sparks = [];
+
+        function dist(a,b) { return Math.hypot(a.x-b.x, a.y-b.y); }
+        function fingerRatio(lm, tip, pip, mcp) { const a=dist(lm[tip],lm[pip]), b=dist(lm[pip],lm[mcp]); return b<0.001?0:a/b; }
+        function getFingerStates(lm) {
+            return FINGER_DEFS.map(f => {
+                const ratio = fingerRatio(lm, f.tip, f.pip, f.mcp);
+                let s = 'neutral';
+                if (ratio > 1.05) s = 'extended';
+                else if (ratio < 0.72) s = 'curled';
+                return { ...f, ratio, state: s };
+            });
+        }
+        function fingerIs(lm, key, st) { return getFingerStates(lm).find(f=>f.key===key)?.state === st; }
+        function isOpenPalm(lm) { return getFingerStates(lm).every(f => f.state === 'extended'); }
+
+        function detectPose(lm) {
+            if (!lm || isOpenPalm(lm)) return false;
+            return fingerIs(lm, 'index', 'extended') && fingerIs(lm, 'middle', 'curled');
+        }
+
+        function updateTarget(lm) {
+            state.pos.x = 1 - lm[8].x; state.pos.y = lm[8].y;
+            state.handAngle = Math.atan2(lm[8].y - lm[0].y, lm[8].x - lm[0].x);
+        }
+
+        function formatDebug(lm) {
+            if (!lm) return '未检测到手';
+            const icons = { extended:'↑', curled:'弯', neutral:'·' };
+            return getFingerStates(lm).map(f => f.label + icons[f.state]).join(' ');
+        }
+
+        function makeTex() {
+            const c = document.createElement('canvas'); c.width=64; c.height=64;
+            const ctx = c.getContext('2d');
+            const g = ctx.createRadialGradient(32,32,0,32,32,32);
+            g.addColorStop(0,'rgba(255,255,255,1)'); g.addColorStop(0.35,'rgba(150,230,255,1)'); g.addColorStop(1,'rgba(0,0,0,0)');
+            ctx.fillStyle=g; ctx.fillRect(0,0,64,64);
+            return new THREE.CanvasTexture(c);
+        }
+        function spherePts(r,n) { const p=[]; for(let i=0;i<n;i++){const phi=Math.acos(2*Math.random()-1),th=Math.random()*Math.PI*2,rr=r*Math.cbrt(Math.random());p.push(rr*Math.sin(phi)*Math.cos(th),rr*Math.sin(phi)*Math.sin(th),rr*Math.cos(phi))} return p; }
+        function genBoltPoints(x1,y1,x2,y2,segs=10) {
+            const p=[]; for(let i=0;i<=segs;i++){const t=i/segs;p.push(x1+(x2-x1)*t+(Math.random()-0.5)*0.05,y1+(y2-y1)*t+(Math.random()-0.5)*0.05,(Math.random()-0.5)*0.04)} return p;
+        }
+        function pts(pos,color,size,opacity,tex) {
+            const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
+            return new THREE.Points(g,new THREE.PointsMaterial({color,size,map:tex,transparent:true,blending:THREE.AdditiveBlending,depthWrite:false,opacity}));
+        }
+
+        function buildEffect() {
+            const g = new THREE.Group();
+            const tex = makeTex();
+            g.core = pts(spherePts(0.08,400), 0xccffff, 0.14, 0.95, tex);
+            g.bolts = [];
+            for (let i=0;i<8;i++){const b=pts([],0x88eeff,0.1,0.9,tex);g.add(b);g.bolts.push(b)}
+            g.add(g.core); g.visible=false; return g;
+        }
+
+        function worldPos(nx,ny) {
+            const vf=camera.fov*Math.PI/180,vh=2*Math.tan(vf/2)*CAMERA_Z,vw=vh*camera.aspect;
+            return {x:(nx-0.5)*vw,y:-(ny-0.5)*vh};
+        }
+
+        function chirp() {
+            if (!audioCtx) return;
+            try {
+                const osc=audioCtx.createOscillator(), gain=audioCtx.createGain();
+                osc.type='sawtooth'; osc.frequency.setValueAtTime(1800+Math.random()*1200,audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(600,audioCtx.currentTime+0.06);
+                gain.gain.setValueAtTime(0.04,audioCtx.currentTime); gain.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+0.08);
+                osc.connect(gain); gain.connect(audioCtx.destination); osc.start(); osc.stop(audioCtx.currentTime+0.08);
+            } catch(_){}
+        }
+
+        function spawnBird(x,y,angle) {
+            for(let i=0;i<3;i++){const a=angle+(Math.random()-0.5)*1.2;sparks.push({x,y,vx:Math.cos(a)*(4+Math.random()*5),vy:Math.sin(a)*(4+Math.random()*5),life:1,type:'bird'})}
+        }
+
+        function initThree() {
+            scene=new THREE.Scene(); camera=new THREE.PerspectiveCamera(50,innerWidth/innerHeight,0.1,100); camera.position.z=CAMERA_Z;
+            renderer=new THREE.WebGLRenderer({antialias:true,alpha:true}); renderer.setPixelRatio(devicePixelRatio); renderer.setSize(innerWidth,innerHeight);
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+            effectGroup=buildEffect(); scene.add(effectGroup); animate();
+        }
+
+        function drawFX2D() {
+            fxCtx.save();
+            if (state.shake>0){fxCtx.translate((Math.random()-0.5)*state.shake*4,(Math.random()-0.5)*state.shake*4);state.shake*=0.85;if(state.shake<0.3)state.shake=0}
+            fxCtx.clearRect(0,0,fxW,fxH); fxCtx.globalCompositeOperation='lighter';
+            if (state.landmarks) {
+                const lm=state.landmarks, hx=lm[8].x*fxW, hy=lm[8].y*fxH, wx=lm[0].x*fxW, wy=lm[0].y*fxH;
+                const conns=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[9,10],[10,11],[11,12],[13,14],[14,15],[15,16],[0,17],[17,18],[18,19],[19,20],[5,9],[9,13],[13,17]];
+                fxCtx.strokeStyle=state.active?'rgba(0,255,200,0.5)':'rgba(100,180,255,0.3)'; fxCtx.lineWidth=2;
+                for(const [a,b] of conns){fxCtx.beginPath();fxCtx.moveTo(lm[a].x*fxW,lm[a].y*fxH);fxCtx.lineTo(lm[b].x*fxW,lm[b].y*fxH);fxCtx.stroke()}
+                const colors={extended:'#00ff88',curled:'#ff4444',neutral:'#ffcc00'};
+                for(const f of getFingerStates(lm)){fxCtx.beginPath();fxCtx.arc(lm[f.tip].x*fxW,lm[f.tip].y*fxH,8,0,Math.PI*2);fxCtx.fillStyle=colors[f.state];fxCtx.fill()}
+            }
+            if (state.active && state.landmarks) {
+                const lm=state.landmarks, hx=lm[8].x*fxW, hy=lm[8].y*fxH, wx=lm[0].x*fxW, wy=lm[0].y*fxH;
+                fxCtx.shadowBlur=20; fxCtx.shadowColor='#66ccff'; fxCtx.strokeStyle='rgba(150,230,255,0.9)'; fxCtx.lineWidth=3;
+                for(let b=0;b<5;b++){fxCtx.beginPath();fxCtx.moveTo(wx,wy);for(let s=1;s<=6+Math.floor(Math.random()*4);s++){const t=s/(6+Math.floor(Math.random()*4));fxCtx.lineTo(wx+(hx-wx)*t+(Math.random()-0.5)*30,wy+(hy-wy)*t+(Math.random()-0.5)*30)}fxCtx.stroke()}
+                if(Math.random()<0.35){spawnBird(hx,hy,state.handAngle);if(Math.random()<0.2)chirp()}
+                const ballR=28+Math.sin(state.time*20)*4+state.chakra*10;
+                const g=fxCtx.createRadialGradient(hx,hy,0,hx,hy,ballR);
+                g.addColorStop(0,'rgba(255,255,255,1)');g.addColorStop(0.3,'rgba(100,220,255,0.95)');g.addColorStop(1,'rgba(0,50,150,0)');
+                fxCtx.fillStyle=g; fxCtx.shadowBlur=40; fxCtx.beginPath(); fxCtx.arc(hx,hy,ballR,0,Math.PI*2); fxCtx.fill();
+                for(let r=0;r<8;r++){const angle=r/8*Math.PI*2+state.time*15;fxCtx.strokeStyle='rgba(180,240,255,0.8)';fxCtx.lineWidth=2;fxCtx.beginPath();fxCtx.moveTo(hx,hy);for(let s=1;s<=5;s++){const t=s/5;fxCtx.lineTo(hx+Math.cos(angle)*ballR*2.5*t+(Math.random()-0.5)*20,hy+Math.sin(angle)*ballR*2.5*t+(Math.random()-0.5)*20)}fxCtx.stroke()}
+            }
+            for(let i=sparks.length-1;i>=0;i--){const s=sparks[i];s.x+=s.vx;s.y+=s.vy;s.life-=0.04;if(s.life<=0){sparks.splice(i,1);continue}fxCtx.globalAlpha=s.life;fxCtx.fillStyle='#aaf0ff';fxCtx.beginPath();fxCtx.moveTo(s.x,s.y);fxCtx.lineTo(s.x-s.vx*2,s.y-s.vy*2+3);fxCtx.lineTo(s.x-s.vx*2,s.y-s.vy*2-3);fxCtx.fill()}
+            fxCtx.globalAlpha=1; fxCtx.shadowBlur=0; fxCtx.restore();
+        }
+
+        function animate() {
+            requestAnimationFrame(animate); state.time+=0.016;
+            effectGroup.visible=state.active;
+            if(state.active){
+                const vh=2*Math.tan(camera.fov*Math.PI/180/2)*CAMERA_Z,w=worldPos(state.pos.x,state.pos.y),s=state.size*vh*1.1;
+                effectGroup.position.lerp(new THREE.Vector3(w.x,w.y,0),0.3);
+                effectGroup.scale.lerp(new THREE.Vector3(s,s,s),0.28);
+                effectGroup.rotation.z=state.handAngle;
+                state.shake=Math.max(state.shake,3+state.chakra*4);
+                effectGroup.bolts.forEach((bolt,i)=>{const angle=i/effectGroup.bolts.length*Math.PI*2+state.time*12,len=0.2+Math.random()*0.25;bolt.geometry.setAttribute('position',new THREE.Float32BufferAttribute(genBoltPoints(0,0,Math.cos(angle)*len,Math.sin(angle)*len,8+Math.floor(Math.random()*4)),3));bolt.geometry.attributes.position.needsUpdate=true});
+            }
+            drawFX2D(); renderer.render(scene,camera);
+        }
+
+        function showPopup(){const pop=document.getElementById('jutsu-popup');pop.classList.add('show');clearTimeout(state.popupTimer);state.popupTimer=setTimeout(()=>pop.classList.remove('show'),1200)}
+
+        function onResults(hands) {
+            state.landmarks=hands[0]||null;
+            const hit=state.landmarks&&detectPose(state.landmarks);
+            if(hit&&!state.active){state.active=true;effectGroup.scale.set(0.5,0.5,0.5);showPopup()}
+            if(!hit)state.active=false;
+            if(state.active){state.chakra=Math.min(1,state.chakra+0.025);updateTarget(state.landmarks)}
+            else state.chakra=Math.max(0,state.chakra-0.03);
+            document.getElementById('chakra-bar').style.width=(state.chakra*100)+'%';
+            document.getElementById('hud').textContent=state.active?'✦ 千鸟！雷切凝聚中！':(state.landmarks?'食指竖起，中指弯曲':'请将手放入画面');
+            document.getElementById('hud').style.color=state.active?'#66ccff':'#b8e8ff';
+            document.getElementById('debug-info').textContent=formatDebug(state.landmarks);
+        }
+
+        async function start() {
+            document.getElementById('intro-panel').style.display='none';
+            ['hud','chakra-bar-wrap','gesture-hint'].forEach(id=>document.getElementById(id).style.display='block');
+            try{audioCtx=new(window.AudioContext||window.webkitAudioContext)()}catch(_){}
+            const fx=document.getElementById('fx-canvas');fxCtx=fx.getContext('2d');fxW=innerWidth;fxH=innerHeight;fx.width=fxW;fx.height=fxH;
+            initThree();
+            const video=document.getElementById('input-video');
+            const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:1280,height:720}});
+            video.srcObject=stream; await new Promise(r=>video.onloadedmetadata=r); video.play();
+            const hands=new Hands({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+            hands.setOptions({maxNumHands:1,modelComplexity:1,minDetectionConfidence:0.5,minTrackingConfidence:0.5});
+            hands.onResults(r=>onResults(r.multiHandLandmarks||[]));
+            await new Camera(video,{onFrame:async()=>{await hands.send({image:video})},width:1280,height:720}).start();
+        }
+
+        document.getElementById('start-btn').addEventListener('click',()=>{if(audioCtx?.state==='suspended')audioCtx.resume();start()});
+        addEventListener('resize',()=>{fxW=innerWidth;fxH=innerHeight;const fx=document.getElementById('fx-canvas');if(fx){fx.width=fxW;fx.height=fxH}if(camera&&renderer){camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)}});
+    </script>
+</body>
+</html>

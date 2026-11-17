@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>螺旋丸 · Rasengan</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@700;900&display=swap');
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #020810; font-family: 'Noto Sans JP', sans-serif; }
+        #input-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; transform: scaleX(-1); }
+        #dark-overlay { position: absolute; inset: 0; z-index: 5; pointer-events: none; background: radial-gradient(ellipse at center, rgba(0,30,60,0.35) 0%, rgba(0,5,15,0.82) 75%); transition: background 0.5s; }
+        #canvas-container { position: absolute; inset: 0; z-index: 10; pointer-events: none; }
+        #fx-canvas { position: absolute; inset: 0; z-index: 12; pointer-events: none; transform: scaleX(-1); }
+        #ui-layer { position: absolute; inset: 0; z-index: 20; pointer-events: none; display: flex; justify-content: center; align-items: center; }
+        #intro-panel { pointer-events: auto; background: rgba(4,16,32,0.92); padding: 44px 48px; border-radius: 4px; border: 3px solid #4dc9ff; text-align: center; max-width: 92vw; box-shadow: 0 0 60px rgba(77,201,255,0.3); }
+        .title { font-size: 2.6rem; font-weight: 900; color: #4dc9ff; text-shadow: 0 0 24px #4dc9ff; letter-spacing: 8px; }
+        .sub { color: #a8e6ff; margin: 10px 0 24px; letter-spacing: 3px; }
+        .hint { color: rgba(168,230,255,0.85); line-height: 2; font-size: 0.95rem; }
+        .btn { margin-top: 24px; background: linear-gradient(180deg, #0099cc, #0066aa); border: 2px solid #aaf0ff; color: #fff; padding: 14px 44px; font-size: 1.1rem; font-weight: 900; cursor: pointer; letter-spacing: 6px; box-shadow: 0 0 30px rgba(77,201,255,0.5); }
+        .btn:hover { transform: scale(1.03); }
+        #chakra-bar-wrap { position: absolute; top: 24px; left: 50%; transform: translateX(-50%); width: min(400px,82vw); display: none; }
+        #chakra-label { color: #4dc9ff; font-size: 0.75rem; letter-spacing: 4px; text-align: center; margin-bottom: 4px; }
+        #chakra-bar-bg { height: 10px; background: rgba(0,20,40,0.8); border: 1px solid rgba(77,201,255,0.5); border-radius: 2px; overflow: hidden; }
+        #chakra-bar { height: 100%; width: 0%; background: linear-gradient(90deg, #0066cc, #4dc9ff, #fff); box-shadow: 0 0 12px #4dc9ff; transition: width 0.12s; }
+        #hud { position: absolute; bottom: 32px; left: 50%; transform: translateX(-50%); background: rgba(4,16,32,0.92); border: 2px solid #4dc9ff; padding: 10px 28px; color: #a8e6ff; font-weight: bold; display: none; white-space: nowrap; }
+        #gesture-hint { position: absolute; top: 72px; right: 24px; display: none; background: rgba(4,16,32,0.88); border: 1px solid #4dc9ff; padding: 12px 16px; color: #a8e6ff; font-size: 0.82rem; line-height: 1.9; }
+        #jutsu-popup { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%) scale(0.6); opacity: 0; pointer-events: none; text-align: center; transition: all 0.35s cubic-bezier(0.34,1.56,0.64,1); }
+        #jutsu-popup.show { opacity: 1; transform: translate(-50%,-50%) scale(1); }
+        #jutsu-popup .jp { font-size: clamp(3rem,10vw,5rem); font-weight: 900; color: #4dc9ff; text-shadow: 0 0 30px #4dc9ff, 4px 4px 0 #000; letter-spacing: 8px; }
+        #jutsu-popup .cn { font-size: 1.1rem; color: rgba(255,255,255,0.8); letter-spacing: 6px; margin-top: 8px; }
+    </style>
+    <script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }</script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+</head>
+<body>
+    <video id="input-video" autoplay playsinline muted></video>
+    <div id="dark-overlay"></div>
+    <div id="canvas-container"></div>
+    <canvas id="fx-canvas"></canvas>
+    <div id="ui-layer">
+        <div id="intro-panel">
+            <div class="title">螺旋丸</div>
+            <div class="sub">RASENGAN · 查克拉螺旋</div>
+            <div class="hint">🤲 双手靠近合拢<br>✊ 或单手握拳捧于胸前</div>
+            <button class="btn" id="start-btn">开启忍术</button>
+        </div>
+        <div id="chakra-bar-wrap"><div id="chakra-label">チャクラ</div><div id="chakra-bar-bg"><div id="chakra-bar"></div></div></div>
+        <div id="gesture-hint">双手合拢 / 单手握拳<br>凝聚蓝色螺旋查克拉<div id="debug-info" style="margin-top:6px;opacity:0.5;font-size:0.72rem"></div></div>
+        <div id="jutsu-popup"><div class="jp">螺旋丸</div><div class="cn">RASENGAN</div></div>
+        <div id="hud">等待手势...</div>
+    </div>
+    <script type="module">
+        import * as THREE from 'three';
+
+        const state = { active: false, chakra: 0, time: 0, pos: { x: 0.5, y: 0.5 }, size: 0.2, landmarks: null, popupTimer: 0 };
+        let scene, camera, renderer, effectGroup, fxCtx, fxW, fxH;
+        const CAMERA_Z = 10;
+
+        function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+        function palmCenter(lm) { const ids = [0,5,9,13,17]; let x=0,y=0; ids.forEach(i=>{x+=lm[i].x;y+=lm[i].y}); return {x:x/5,y:y/5}; }
+        function fingerExtended(lm, tip, pip, mcp) { return dist(lm[tip], lm[pip]) > dist(lm[pip], lm[mcp]) * 0.85; }
+        function isOpenPalm(lm) { return [[8,6,5],[12,10,9],[16,14,13],[20,18,17]].every(([t,p,m]) => fingerExtended(lm,t,p,m)); }
+        function isCuppedHand(lm) { return [[12,10,9],[16,14,13],[20,18,17]].every(([t,p,m]) => !fingerExtended(lm,t,p,m)); }
+
+        function detectPose(hands) {
+            if (hands.length === 2) {
+                const p0 = palmCenter(hands[0]), p1 = palmCenter(hands[1]);
+                const d = dist(p0, p1);
+                if (d < 0.38 && !(isOpenPalm(hands[0]) && isOpenPalm(hands[1]))) return true;
+            }
+            if (hands.length === 1 && (isCuppedHand(hands[0]) || !isOpenPalm(hands[0]))) {
+                const curled = [[12,10,9],[16,14,13],[20,18,17]].filter(([t,p,m]) => !fingerExtended(hands[0],t,p,m)).length;
+                if (curled >= 2) return true;
+            }
+            return false;
+        }
+
+        function updateTarget(hands) {
+            if (hands.length === 2) {
+                const p0 = palmCenter(hands[0]), p1 = palmCenter(hands[1]);
+                state.pos.x = 1 - (p0.x + p1.x) / 2;
+                state.pos.y = (p0.y + p1.y) / 2;
+                state.size = Math.max(0.18, 0.35 - dist(p0, p1) * 0.45);
+            } else {
+                const p = palmCenter(hands[0]);
+                state.pos.x = 1 - p.x; state.pos.y = p.y; state.size = 0.2;
+            }
+        }
+
+        function makeTex() {
+            const c = document.createElement('canvas'); c.width = 64; c.height = 64;
+            const ctx = c.getContext('2d');
+            const g = ctx.createRadialGradient(32,32,0,32,32,32);
+            g.addColorStop(0,'rgba(255,255,255,1)'); g.addColorStop(0.35,'rgba(100,220,255,0.95)'); g.addColorStop(1,'rgba(0,0,0,0)');
+            ctx.fillStyle = g; ctx.fillRect(0,0,64,64);
+            return new THREE.CanvasTexture(c);
+        }
+        function spiralPts(turns, n, rMax) {
+            const p = []; const total = turns * n;
+            for (let i = 0; i < total; i++) { const t = i/total; const th = t*turns*Math.PI*2; const r = t*rMax; p.push(Math.cos(th)*r, Math.sin(th)*r, (Math.random()-0.5)*0.08); }
+            return p;
+        }
+        function ringPts(r, n) { const p=[]; for(let i=0;i<n;i++){const a=i/n*Math.PI*2;p.push(Math.cos(a)*r,Math.sin(a)*r,0)} return p; }
+        function spherePts(r, n) { const p=[]; for(let i=0;i<n;i++){const phi=Math.acos(2*Math.random()-1),th=Math.random()*Math.PI*2,rr=r*Math.cbrt(Math.random());p.push(rr*Math.sin(phi)*Math.cos(th),rr*Math.sin(phi)*Math.sin(th),rr*Math.cos(phi))} return p; }
+        function pts(pos, color, size, opacity, tex) {
+            const g = new THREE.BufferGeometry();
+            g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+            return new THREE.Points(g, new THREE.PointsMaterial({ color, size, map: tex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity }));
+        }
+
+        function buildEffect() {
+            const g = new THREE.Group();
+            const tex = makeTex();
+            for (let layer = 0; layer < 5; layer++) {
+                const m = pts(spiralPts(3+layer*0.5, 300, 0.32+layer*0.04), 0x88ddff, 0.12+layer*0.02, 0.85-layer*0.06, tex);
+                m.userData.layer = layer; g.add(m);
+            }
+            g.add(pts(ringPts(0.18,600), 0xffffff, 0.1, 0.95, tex));
+            g.add(pts(spherePts(0.12,800), 0xaaf0ff, 0.14, 0.95, tex));
+            g.add(pts(ringPts(0.35,400), 0x3399ff, 0.08, 0.6, tex));
+            g.visible = false; return g;
+        }
+
+        function worldPos(nx, ny) {
+            const vf = camera.fov * Math.PI / 180, vh = 2*Math.tan(vf/2)*CAMERA_Z, vw = vh*camera.aspect;
+            return { x: (nx-0.5)*vw, y: -(ny-0.5)*vh };
+        }
+
+        function initThree() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(50, innerWidth/innerHeight, 0.1, 100);
+            camera.position.z = CAMERA_Z;
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setPixelRatio(devicePixelRatio);
+            renderer.setSize(innerWidth, innerHeight);
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+            effectGroup = buildEffect();
+            scene.add(effectGroup);
+            animate();
+        }
+
+        function drawFX2D() {
+            fxCtx.clearRect(0,0,fxW,fxH);
+            if (!state.active) return;
+            const px = (1-state.pos.x)*fxW, py = state.pos.y*fxH;
+            const baseR = state.size * Math.min(fxW,fxH) * 0.55;
+            const rot = state.time * 8;
+            fxCtx.globalCompositeOperation = 'lighter';
+            for (let ring = 0; ring < 3; ring++) {
+                const r = baseR*(0.6+ring*0.2), startA = rot*(ring%2===0?1:-1)+ring;
+                fxCtx.strokeStyle = `rgba(100,220,255,${0.7-ring*0.15})`; fxCtx.lineWidth = 4-ring;
+                fxCtx.beginPath();
+                for (let i=0;i<=60;i++){const a=startA+i/60*Math.PI*2,rr=r+Math.sin(a*6+state.time*10)*4,x=px+Math.cos(a)*rr,y=py+Math.sin(a)*rr;i?fxCtx.lineTo(x,y):fxCtx.moveTo(x,y)}
+                fxCtx.closePath(); fxCtx.stroke();
+            }
+            for (let arm=0;arm<4;arm++) {
+                fxCtx.strokeStyle='rgba(200,240,255,0.85)'; fxCtx.lineWidth=3; fxCtx.beginPath();
+                for(let i=0;i<80;i++){const t=i/80,a=rot*2.5+arm*Math.PI/2+t*Math.PI*4,r=t*baseR*0.9,x=px+Math.cos(a)*r,y=py+Math.sin(a)*r;i?fxCtx.lineTo(x,y):fxCtx.moveTo(x,y)}
+                fxCtx.stroke();
+            }
+            const grad = fxCtx.createRadialGradient(px,py,0,px,py,baseR*0.45);
+            grad.addColorStop(0,'rgba(255,255,255,1)'); grad.addColorStop(0.4,'rgba(150,230,255,0.9)'); grad.addColorStop(1,'rgba(0,100,200,0)');
+            fxCtx.fillStyle=grad; fxCtx.beginPath(); fxCtx.arc(px,py,baseR*0.45,0,Math.PI*2); fxCtx.fill();
+            if (state.landmarks) {
+                const lm=state.landmarks, conns=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[9,10],[10,11],[11,12],[13,14],[14,15],[15,16],[0,17],[17,18],[18,19],[19,20],[5,9],[9,13],[13,17]];
+                fxCtx.strokeStyle='rgba(100,200,255,0.4)'; fxCtx.lineWidth=2;
+                for(const [a,b] of conns){fxCtx.beginPath();fxCtx.moveTo(lm[a].x*fxW,lm[a].y*fxH);fxCtx.lineTo(lm[b].x*fxW,lm[b].y*fxH);fxCtx.stroke()}
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            state.time += 0.016;
+            effectGroup.visible = state.active;
+            if (state.active) {
+                const vh = 2*Math.tan(camera.fov*Math.PI/180/2)*CAMERA_Z;
+                const w = worldPos(state.pos.x, state.pos.y);
+                const s = state.size * vh * (1.2 + state.chakra * 0.4);
+                effectGroup.position.lerp(new THREE.Vector3(w.x,w.y,0), 0.25);
+                effectGroup.scale.lerp(new THREE.Vector3(s,s,s), 0.28);
+                effectGroup.children.forEach((c,i) => {
+                    if (c.userData.layer !== undefined) c.rotation.z = state.time * (3+c.userData.layer*0.8) * (c.userData.layer%2===0?1:-1);
+                    else if (i === effectGroup.children.length-2) c.rotation.z = state.time*5;
+                    else if (i === effectGroup.children.length-1) c.rotation.z = -state.time*2;
+                });
+                effectGroup.rotation.x = Math.sin(state.time*2)*0.1;
+            }
+            drawFX2D();
+            renderer.render(scene, camera);
+        }
+
+        function showPopup() {
+            const pop = document.getElementById('jutsu-popup');
+            pop.classList.add('show');
+            clearTimeout(state.popupTimer);
+            state.popupTimer = setTimeout(() => pop.classList.remove('show'), 1200);
+        }
+
+        function onResults(hands) {
+            state.landmarks = hands[0] || null;
+            const hit = detectPose(hands);
+            if (hit && !state.active) { state.active = true; effectGroup.scale.set(0.5,0.5,0.5); showPopup(); }
+            if (!hit) state.active = false;
+            if (state.active) { state.chakra = Math.min(1, state.chakra+0.025); updateTarget(hands); }
+            else state.chakra = Math.max(0, state.chakra-0.03);
+            document.getElementById('chakra-bar').style.width = (state.chakra*100)+'%';
+            document.getElementById('dark-overlay').style.background = state.active
+                ? 'radial-gradient(ellipse at center, rgba(0,40,80,0.45) 0%, rgba(0,5,15,0.85) 75%)'
+                : 'radial-gradient(ellipse at center, rgba(0,30,60,0.35) 0%, rgba(0,5,15,0.82) 75%)';
+            const hud = document.getElementById('hud');
+            hud.textContent = state.active ? '✦ 螺旋丸凝聚中！' : (hands.length ? '双手合拢或单手握拳' : '请将手放入画面');
+            hud.style.color = state.active ? '#4dc9ff' : '#a8e6ff';
+            document.getElementById('debug-info').textContent = hands.length ? `${hands.length}只手` : '未检测到手';
+        }
+
+        async function start() {
+            document.getElementById('intro-panel').style.display = 'none';
+            ['hud','chakra-bar-wrap','gesture-hint'].forEach(id => document.getElementById(id).style.display = 'block');
+            const fx = document.getElementById('fx-canvas');
+            fxCtx = fx.getContext('2d'); fxW = innerWidth; fxH = innerHeight; fx.width = fxW; fx.height = fxH;
+            initThree();
+            const video = document.getElementById('input-video');
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode:'user', width:1280, height:720 } });
+            video.srcObject = stream;
+            await new Promise(r => video.onloadedmetadata = r);
+            video.play();
+            const hands = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+            hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+            hands.onResults(r => onResults(r.multiHandLandmarks || []));
+            await new Camera(video, { onFrame: async () => { await hands.send({ image: video }); }, width: 1280, height: 720 }).start();
+        }
+
+        document.getElementById('start-btn').addEventListener('click', start);
+        addEventListener('resize', () => {
+            fxW = innerWidth; fxH = innerHeight;
+            const fx = document.getElementById('fx-canvas');
+            if (fx) { fx.width = fxW; fx.height = fxH; }
+            if (camera && renderer) { camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); }
+        });
+    </script>
+</body>
+</html>
